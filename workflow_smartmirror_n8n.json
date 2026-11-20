@@ -1,0 +1,165 @@
+{
+  "name": "SmartMirror - n8n AI Orchestration Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "mirror-agent",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "webhook-trigger",
+      "name": "Smart Mirror Voice Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 300],
+      "webhookId": "mirror-agent"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || $input.first().json;\nconst query = (body.query || body.text || '').trim();\nconst type = body.type || 'chat';\nconst persona = body.persona || 'Jarvis';\nconst language = body.language || 'English';\nconst image = body.image || null;\nconst messages = body.messages || null;\n\n// Rule-based & heuristic intent classification\nconst q = query.toLowerCase();\nlet intent = 'GENERAL';\nif (type === 'vision' || q.includes('outfit') || q.includes('wearing') || q.includes('look at me') || q.includes('scan') || q.includes('clothes')) intent = 'OUTFIT';\nelse if (q.includes('play') || q.includes('song') || q.includes('music')) intent = 'MUSIC_PLAY';\nelse if (q.includes('generate image') || q.includes('create image')) intent = 'IMAGE_GENERATE';\nelse if (q.includes('switch') && (q.includes('language') || q.includes('speak in') || q.includes('mathnadu') || q.includes('matladu') || q.includes('bolo'))) intent = 'LANGUAGE_SWITCH';\n\nreturn [{ json: { query, type, persona, language, intent, image, messages } }];"
+      },
+      "id": "intent-classifier",
+      "name": "Intent Classifier & Normalizer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            { "conditions": { "options": { "caseSensitive": true }, "conditions": [{ "leftValue": "={{ $json.intent }}", "rightValue": "LANGUAGE_SWITCH", "operator": { "type": "string", "operation": "equals" } }] }, "outputKey": "LANGUAGE_SWITCH" },
+            { "conditions": { "options": { "caseSensitive": true }, "conditions": [{ "leftValue": "={{ $json.intent }}", "rightValue": "IMAGE_GENERATE", "operator": { "type": "string", "operation": "equals" } }] }, "outputKey": "IMAGE_GENERATE" },
+            { "conditions": { "options": { "caseSensitive": true }, "conditions": [{ "leftValue": "={{ $json.intent }}", "rightValue": "MUSIC_PLAY", "operator": { "type": "string", "operation": "equals" } }] }, "outputKey": "MUSIC_PLAY" },
+            { "conditions": { "options": { "caseSensitive": true }, "conditions": [{ "leftValue": "={{ $json.intent }}", "rightValue": "OUTFIT", "operator": { "type": "string", "operation": "equals" } }] }, "outputKey": "OUTFIT" }
+          ]
+        },
+        "options": { "fallbackOutput": "extra" }
+      },
+      "id": "switch-router",
+      "name": "Agentic Switch Router",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [520, 300]
+    },
+    {
+      "parameters": { "assignments": { "assignments": [{ "id": "a1", "name": "reply", "value": "={{ 'Language switched to ' + $json.language }}", "type": "string" }] }, "options": {} },
+      "id": "set-lang",
+      "name": "Language State Handler",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [800, 80]
+    },
+    {
+      "parameters": { "assignments": { "assignments": [{ "id": "a3", "name": "reply", "value": "={{ 'Generating image for: ' + $json.query }}", "type": "string" }, { "id": "a3b", "name": "image_url", "value": "={{ 'https://image.pollinations.ai/prompt/' + encodeURIComponent($json.query) }}", "type": "string" }] }, "options": {} },
+      "id": "set-image",
+      "name": "Image Generation Dispatcher",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [800, 220]
+    },
+    {
+      "parameters": { "assignments": { "assignments": [{ "id": "a4", "name": "reply", "value": "Playing music for you!", "type": "string" }, { "id": "a4b", "name": "song_query", "value": "={{ $json.query }}", "type": "string" }] }, "options": {} },
+      "id": "set-music",
+      "name": "Media Playback Controller",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [800, 360]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Authorization", "value": "Bearer YOUR_GROQ_API_KEY" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'qwen/qwen3.8-27b', messages: [{ role: 'system', content: 'You are Jarvis, a smart mirror AI. Analyze the outfit in the camera frame and provide quick, practical styling critique and weather accessories in ' + $json.language + '. Max 2 sentences.' }, { role: 'user', content: $json.query }] }) }}",
+        "options": {}
+      },
+      "id": "vision-node",
+      "name": "Outfit Vision Analysis (Groq VLM)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [800, 500]
+    },
+    {
+      "parameters": { "assignments": { "assignments": [{ "id": "a5", "name": "reply", "value": "={{ $json.choices ? $json.choices[0].message.content : 'Looking sharp today!' }}", "type": "string" }] }, "options": {} },
+      "id": "set-vision",
+      "name": "Format Vision Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [1080, 500]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nlet messages = input.messages;\nif (!messages || !Array.isArray(messages) || messages.length === 0) {\n  messages = [\n    { role: 'system', content: 'You are Jarvis, a smart mirror AI assistant. Reply in ' + (input.language || 'English') + '. Keep answers concise, maximum 2 sentences.' },\n    { role: 'user', content: input.query || '' }\n  ];\n}\nreturn [{ json: { messages, persona: input.persona, language: input.language, query: input.query } }];"
+      },
+      "id": "build-messages",
+      "name": "Context & Prompt Assembler",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [800, 640]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Authorization", "value": "Bearer YOUR_GROQ_API_KEY" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'qwen/qwen3.8-27b', messages: $json.messages }) }}",
+        "options": {}
+      },
+      "id": "llm-node",
+      "name": "Multilingual Reasoning Engine (Groq LLM)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1080, 640]
+    },
+    {
+      "parameters": { "assignments": { "assignments": [{ "id": "a6", "name": "reply", "value": "={{ $json.choices ? $json.choices[0].message.content : 'I could not process that request right now.' }}", "type": "string" }] }, "options": {} },
+      "id": "set-general",
+      "name": "Format Natural Language Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [1340, 640]
+    },
+    {
+      "parameters": { "options": {} },
+      "id": "respond-node",
+      "name": "Respond to Smart Mirror Client",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1560, 380]
+    }
+  ],
+  "connections": {
+    "Smart Mirror Voice Webhook": { "main": [[{ "node": "Intent Classifier & Normalizer", "type": "main", "index": 0 }]] },
+    "Intent Classifier & Normalizer": { "main": [[{ "node": "Agentic Switch Router", "type": "main", "index": 0 }]] },
+    "Agentic Switch Router": {
+      "main": [
+        [{ "node": "Language State Handler", "type": "main", "index": 0 }],
+        [{ "node": "Image Generation Dispatcher", "type": "main", "index": 0 }],
+        [{ "node": "Media Playback Controller", "type": "main", "index": 0 }],
+        [{ "node": "Outfit Vision Analysis (Groq VLM)", "type": "main", "index": 0 }],
+        [{ "node": "Context & Prompt Assembler", "type": "main", "index": 0 }]
+      ]
+    },
+    "Language State Handler": { "main": [[{ "node": "Respond to Smart Mirror Client", "type": "main", "index": 0 }]] },
+    "Image Generation Dispatcher": { "main": [[{ "node": "Respond to Smart Mirror Client", "type": "main", "index": 0 }]] },
+    "Media Playback Controller": { "main": [[{ "node": "Respond to Smart Mirror Client", "type": "main", "index": 0 }]] },
+    "Outfit Vision Analysis (Groq VLM)": { "main": [[{ "node": "Format Vision Response", "type": "main", "index": 0 }]] },
+    "Format Vision Response": { "main": [[{ "node": "Respond to Smart Mirror Client", "type": "main", "index": 0 }]] },
+    "Context & Prompt Assembler": { "main": [[{ "node": "Multilingual Reasoning Engine (Groq LLM)", "type": "main", "index": 0 }]] },
+    "Multilingual Reasoning Engine (Groq LLM)": { "main": [[{ "node": "Format Natural Language Response", "type": "main", "index": 0 }]] },
+    "Format Natural Language Response": { "main": [[{ "node": "Respond to Smart Mirror Client", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "active": true
+}
+
