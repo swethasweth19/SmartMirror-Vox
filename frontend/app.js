@@ -52,7 +52,16 @@ async function callGroqAPI(body) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     });
-    if (!res.ok) throw new Error("API error: " + res.status);
+    if (!res.ok) {
+      let errDetail = "";
+      try {
+        const errJson = await res.json();
+        errDetail = errJson.error || JSON.stringify(errJson);
+      } catch (_) {
+        errDetail = await res.text();
+      }
+      throw new Error(`API error (${res.status}): ${errDetail || 'Endpoint not found or offline'}`);
+    }
     return await res.json();
   }
 }

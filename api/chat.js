@@ -1,39 +1,45 @@
-// Vercel serverless function — proxies requests to Groq API
-// Your API key stays in Vercel environment variables, never exposed to browser
+// Modern Vercel Serverless Function — proxies requests to Groq API
+// Keeps GROQ_API_KEY secure in Vercel Environment Variables
 
-module.exports = async (req, res) => {
-  // Set CORS headers
+module.exports = async function handler(req, res) {
+  // CORS headers
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization'
+  );
 
   if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+    res.status(200).end();
+    return;
   }
 
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+    res.status(405).json({ error: 'Method not allowed' });
+    return;
   }
 
-  const GROQ_KEY = process.env.GROQ_API_KEY;
-  if (!GROQ_KEY) {
-    return res.status(500).json({ error: 'GROQ_API_KEY not configured in Vercel environment variables' });
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) {
+    res.status(500).json({ error: 'GROQ_API_KEY environment variable is not configured in Vercel settings.' });
+    return;
   }
 
   try {
-    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + GROQ_KEY
+        'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify(req.body)
     });
 
-    const data = await response.json();
-    return res.status(response.status).json(data);
-  } catch (err) {
-    return res.status(500).json({ error: 'Failed to reach Groq API: ' + err.message });
+    const data = await groqResponse.json();
+    res.status(groqResponse.status).json(data);
+  } catch (error) {
+    res.status(500).json({ error: 'Internal server error: ' + error.message });
   }
 };
-
