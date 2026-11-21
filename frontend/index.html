@@ -8,17 +8,7 @@
 </head>
 <body>
 
-<!-- Startup overlay — required on mobile for microphone & audio permissions -->
-<div id="startup-overlay" onclick="startMirror()">
-  <div class="startup-card">
-    <div class="startup-icon">🤖</div>
-    <div class="startup-title">JARVIS AI MIRROR</div>
-    <div class="startup-btn">✨ TAP TO ACTIVATE</div>
-    <span class="startup-hint">Tap anywhere to enable microphone & camera</span>
-  </div>
-</div>
-
-<div class="mirror" style="display: none;" id="main-mirror">
+<div class="mirror" id="main-mirror">
 
   <video id="video" autoplay muted></video>
   <canvas id="canvas"></canvas>
@@ -36,8 +26,8 @@
     <div id="weather-city">BANGALORE, IN</div>
   </div>
 
-  <div class="widget center" id="wake-trigger" onclick="onCenterTap()">
-    <div id="wake-status">😴 SAY "JARVIS" OR TAP</div>
+  <div class="widget center">
+    <div id="wake-status">😴 SAY "JARVIS"</div>
     <div class="pulse-ring" id="pulseRing"></div>
     <div id="transcript"></div>
     <div id="loading">⏳ THINKING...</div>

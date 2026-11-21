@@ -393,23 +393,34 @@ function setupRecognition() {
   recognition.lang = currentLang;
   recognition.continuous = true;
   recognition.interimResults = true;
+  recognition.maxAlternatives = 3;
 
-  recognition.onstart = () => { recognitionRunning = true; };
+  recognition.onstart = () => {
+    recognitionRunning = true;
+    if (!conversationActive) {
+      setWakeStatus('😴 SAY "JARVIS"');
+    }
+  };
 
   recognition.onresult = (event) => {
     let finalTranscript = '';
     let interimTranscript = '';
+    let allText = '';
 
     for (let i = event.resultIndex; i < event.results.length; i++) {
-      if (event.results[i].isFinal) {
-        finalTranscript += event.results[i][0].transcript;
+      const res = event.results[i];
+      if (res.isFinal) {
+        finalTranscript += res[0].transcript;
       } else {
-        interimTranscript += event.results[i][0].transcript;
+        interimTranscript += res[0].transcript;
+      }
+      for (let j = 0; j < res.length; j++) {
+        allText += ' ' + res[j].transcript;
       }
     }
 
     const heard = (finalTranscript || interimTranscript).trim();
-    const check = (finalTranscript + interimTranscript).toLowerCase();
+    const check = (heard + ' ' + allText).toLowerCase();
 
     // "Stop" interrupts Jarvis mid-speech — works even while he's talking
     if (conversationActive && (isSpeaking || isProcessing)) {
@@ -431,24 +442,29 @@ function setupRecognition() {
 
     if (ignoreInput || isSpeaking || isProcessing) return;
 
-    if (heard && conversationActive) {
+    // Show heard speech in real time so user knows mic is hearing them
+    if (heard) {
       document.getElementById('transcript').innerText = '👂 ' + heard;
     }
 
-    // Wake word detection (when asleep) — uses INTERIM results for instant response
+    // Wake word detection (when asleep) — uses INTERIM and FINAL results for instant response
     if (!conversationActive) {
-      if (
+      const isWake =
         check.includes('jarvis') ||
+        check.includes('jarvish') ||
         check.includes('javis') ||
         check.includes('jarwis') ||
         check.includes('jervis') ||
-        check.includes('jarvish') ||
+        check.includes('charvis') ||
+        check.includes('travis') ||
         check.includes('service') ||
+        check.includes('wake up') ||
         check.includes('hey jarvis') ||
         check.includes('hey jarvish') ||
         check.includes('hi jarvis') ||
-        check.includes('wake up')
-      ) {
+        check.includes('hello jarvis');
+
+      if (isWake) {
         activateConversation();
       }
       return;
@@ -556,26 +572,28 @@ function setupRecognition() {
 
   recognition.onerror = (event) => {
     recognitionRunning = false;
-    if (event.error === 'not-allowed') {
-      setAIResponse('❌ Mic blocked! Allow mic in browser settings.');
+    console.warn("Speech recognition error:", event.error);
+    if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+      setWakeStatus('❌ MIC PERMISSION NEEDED');
+      setAIResponse('❌ Please allow microphone access in your browser settings!');
       return;
     }
     if (event.error === 'no-speech') {
-      // Normal pause/silence timeout on mobile
+      // Normal pause/silence timeout
       if (!fullyAsleep && !isSpeaking && !isProcessing) {
-        safeStart(500);
+        safeStart(200);
       }
       return;
     }
     if (!fullyAsleep && !isSpeaking && !isProcessing) {
-      safeStart(800);
+      safeStart(400);
     }
   };
 
   recognition.onend = () => {
     recognitionRunning = false;
     if (!fullyAsleep && !isSpeaking && !isProcessing) {
-      safeStart(400);
+      safeStart(200);
     }
   };
 }
@@ -590,15 +608,17 @@ function interruptAndListen() {
   setAIStatus('🎤 LISTENING...');
   showPulse(true);
   document.getElementById('transcript').innerText = '👂 Ask your question...';
-  safeStart(300);
+  safeStart(200);
 }
 
 let restartTimer = null;
-function safeStart(delay = 300) {
+function safeStart(delay = 200) {
   if (recognitionRunning || fullyAsleep || isSpeaking || isProcessing) return;
+  if (!recognition) setupRecognition();
   if (!recognition) return;
   if (restartTimer) clearTimeout(restartTimer);
   restartTimer = setTimeout(() => {
+    if (recognitionRunning || fullyAsleep || isSpeaking || isProcessing) return;
     try {
       recognition.start();
     } catch(e) {}
@@ -616,28 +636,13 @@ function activateConversation() {
   if (conversationActive) return;
   fullyAsleep = false;
   conversationActive = true;
-  isProcessing = true;
+  isProcessing = false;
   conversationHistory = [];
   setWakeStatus('🟢 JARVIS ACTIVE...');
   showPulse(true);
-  document.getElementById('transcript').innerText = '';
+  document.getElementById('transcript').innerText = '👂 "Jarvis" detected!';
   speakOnce("At your service! How can I help you?");
 }
-
-function onCenterTap() {
-  if (!mirrorStarted) {
-    startMirror();
-    return;
-  }
-  if (!conversationActive) {
-    activateConversation();
-  } else if (isSpeaking || isProcessing) {
-    interruptAndListen();
-  } else {
-    safeStart(100);
-  }
-}
-window.onCenterTap = onCenterTap;
 
 function goToSleep() {
   conversationActive = false;
@@ -653,7 +658,7 @@ function goToSleep() {
   safeStop();
 
   showPulse(false);
-  setWakeStatus('😴 SAY "JARVIS" OR TAP');
+  setWakeStatus('😴 SAY "JARVIS"');
   setAIResponse('Ready to assist you!');
   setAIStatus('🤖 JARVIS AI MIRROR');
   document.getElementById('transcript').innerText = '';
@@ -665,8 +670,8 @@ function goToSleep() {
     isSpeaking = false;
     setTimeout(() => {
       ignoreInput = false;
-      safeStart(500); // Restart mic to listen for wake word
-    }, 800);
+      safeStart(300); // Restart mic to listen for wake word
+    }, 500);
   };
   isSpeaking = true;
   window.speechSynthesis.speak(utter);
@@ -904,6 +909,21 @@ function speakOnce(text) {
     safeStart();
   }
 
+  // Watchdog timer: on Android Chrome, utter.onend sometimes fails to fire
+  const watchdogTime = Math.max(3000, Math.min(12000, (text.length || 20) * 120));
+  setTimeout(() => {
+    if (isSpeaking && myCount === speakCount) {
+      isSpeaking = false;
+      isProcessing = false;
+      ignoreInput = false;
+      if (conversationActive) {
+        setWakeStatus('🟢 JARVIS ACTIVE...');
+        showPulse(true);
+      }
+      safeStart(200);
+    }
+  }, watchdogTime);
+
   setTimeout(() => {
     if (myCount !== speakCount) {
       isSpeaking = false;
@@ -1012,70 +1032,55 @@ function blobToBase64(blob) {
   });
 }
 
-// ========== STARTUP (Camera, Mic & Permissions) ==========
+// ========== STARTUP (100% Hands-Free Auto Start) ==========
 let mirrorStarted = false;
 
 function startMirror() {
   if (mirrorStarted) return;
   mirrorStarted = true;
 
-  const overlay = document.getElementById('startup-overlay');
-  if (overlay) overlay.style.display = 'none';
-  document.getElementById('main-mirror').style.display = 'block';
+  const mirrorEl = document.getElementById('main-mirror');
+  if (mirrorEl) mirrorEl.style.display = 'block';
 
-  // Pre-warm SpeechSynthesis on user interaction (vital for mobile iOS/Android)
-  if (window.speechSynthesis) {
-    try {
-      const dummy = new SpeechSynthesisUtterance('');
-      dummy.volume = 0;
-      window.speechSynthesis.speak(dummy);
-    } catch(e) {}
+  // START SPEECH RECOGNITION IMMEDIATELY (Don't wait for camera)
+  setupRecognition();
+  safeStart(100);
+
+  fetchWeather();
+  fetchNews();
+
+  // Initialize camera in parallel (audio: false ensures mic is never stolen!)
+  if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+    navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user' },
+        audio: false
+      })
+      .then(stream => {
+        const video = document.getElementById('video');
+        if (video) video.srcObject = stream;
+        window.stream = stream;
+      })
+      .catch(err => {
+        console.warn("Camera optional/denied:", err);
+      });
   }
-
-  // CRITICAL FOR MOBILE: audio must be false!
-  // If audio is true, WebRTC steals and locks the phone's microphone, blocking SpeechRecognition!
-  navigator.mediaDevices.getUserMedia({
-      video: {
-        width: { ideal: 1920 },
-        height: { ideal: 1080 },
-        facingMode: 'user',
-        frameRate: { ideal: 30 }
-      },
-      audio: false
-    })
-    .then(stream => {
-      document.getElementById('video').srcObject = stream;
-      window.stream = stream;
-      setupRecognition();
-      safeStart(400);
-      fetchWeather();
-      fetchNews();
-    })
-    .catch(err => {
-      console.warn("Camera access failed or unavailable:", err);
-      setAIResponse("ℹ️ Camera off or denied. Voice mode active.");
-      setupRecognition();
-      safeStart(400);
-      fetchWeather();
-      fetchNews();
-    });
 }
 
-// Auto-start on desktop, prompt tap on mobile for reliable audio/mic permissions
-window.addEventListener('load', () => {
-  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || (window.innerWidth <= 768);
-  if (!isMobile) {
-    startMirror();
-  } else {
-    // Keep overlay visible on mobile so user taps to grant user-gesture permissions
-    const overlay = document.getElementById('startup-overlay');
-    if (overlay) {
-      overlay.style.display = 'flex';
-      const hint = overlay.querySelector('.startup-hint');
-      if (hint) hint.innerText = 'Tap anywhere to enable microphone & camera';
-    }
-  }
-});
+// 100% Hands-free Auto-start immediately on page load
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', startMirror);
+} else {
+  startMirror();
+}
+window.addEventListener('load', startMirror);
 
-// Make startMirror available globally (fallback if overlay is clicked)
+// Passive interaction listener (silently unlocks Web Audio if browser held it back)
+document.addEventListener('click', () => {
+  if (!recognitionRunning) safeStart(50);
+}, { passive: true });
+document.addEventListener('touchstart', () => {
+  if (!recognitionRunning) safeStart(50);
+}, { passive: true });
+
+// Make startMirror available globally
 window.startMirror = startMirror;
