@@ -11,8 +11,8 @@ const USE_N8N_BACKEND = true; // Set to true to route requests through the n8n o
 const IS_LOCAL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 // Note: Insert your Groq API key here for local offline dev, or configure GROQ_API_KEY in Vercel environment variables
 const GROQ_KEY_LOCAL = localStorage.getItem("GROQ_API_KEY") || "YOUR_GROQ_API_KEY";
-const GROQ_MODEL = "llama-3.3-70b-versatile";
-const GROQ_VISION_MODEL = "llama-3.2-11b-vision-preview";
+const GROQ_MODEL = "openai/gpt-oss-120b";
+const GROQ_VISION_MODEL = "qwen/qwen3.8-27b";
 
 // Smart AI Dispatcher: Routes through n8n Workflow Automation when available, with resilient proxy fallback
 async function callGroqAPI(body) {
@@ -1247,6 +1247,21 @@ async function sendToN8n(question) {
     ignoreInput = false;
     conversationHistory.pop();
 
+    // Smart fallback for Movie Suggestions if API is temporarily rate-limited or offline
+    const isMovieQuery = /movie|cinema|film|picture|chitra|watch|suggest/i.test(question);
+    if (isMovieQuery) {
+      const fallbackMovieResponse = getCuratedMovieSuggestions(currentLang, question);
+      conversationHistory.push({
+        role: "assistant",
+        content: fallbackMovieResponse
+      });
+      setAIStatus("🤖 JARVIS SAYS");
+      setAIResponse(fallbackMovieResponse);
+      speakOnce(fallbackMovieResponse);
+      setTimeout(() => safeStart(), 1000);
+      return;
+    }
+
     let displayMsg = err.message;
     let voiceMsg = err.message;
 
@@ -1259,6 +1274,23 @@ async function sendToN8n(question) {
     speakOnce(voiceMsg);
     setTimeout(() => safeStart(), 1500);
   }
+}
+
+function getCuratedMovieSuggestions(lang, query) {
+  const q = (query || '').toLowerCase();
+  if (q.includes('kannada') || lang === 'kn-IN') {
+    return "🎬 Top Kannada Movies to watch:\n1. KGF Chapter 1 & 2 - Epic action blockbuster\n2. Kantara - Phenomenal folklore thriller\n3. 777 Charlie - Heartwarming emotional journey\n4. Sapta Saagaradaache Ello - Acclaimed romantic drama";
+  }
+  if (q.includes('telugu') || lang === 'te-IN') {
+    return "🎬 Top Telugu Movies to watch:\n1. RRR - High-octane historical action\n2. Baahubali - Grand cinematic epic\n3. Pushpa: The Rise - Intense rustic action\n4. Kalki 2898 AD - Futuristic sci-fi spectacle";
+  }
+  if (q.includes('hindi') || q.includes('bollywood') || lang === 'hi-IN') {
+    return "🎬 Top Bollywood Movies to watch:\n1. 3 Idiots - Timeless comedy-drama\n2. Dangal - Inspiring sports masterpiece\n3. Stree 2 - Blockbuster horror-comedy\n4. Zindagi Na Milegi Dobara - Iconic friendship road-trip";
+  }
+  if (q.includes('tamil') || lang === 'ta-IN') {
+    return "🎬 Top Tamil Movies to watch:\n1. Vikram - Gritty action thriller\n2. Leo - High-voltage action drama\n3. Jailer - Superstar mass entertainer\n4. Ponniyin Selvan - Grand historic epic";
+  }
+  return "🎬 Top Acclaimed Movies to watch:\n1. Inception - Mind-bending sci-fi thriller\n2. Interstellar - Cosmic emotional masterpiece\n3. The Dark Knight - Legendary superhero drama\n4. Oppenheimer - Gripping historical biopic";
 }
 
 // ========== CAPTURE & ANALYZE OUTFIT ==========

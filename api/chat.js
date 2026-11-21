@@ -1,18 +1,16 @@
 // Modern Vercel Serverless Function — proxies requests to Groq API
 // Keeps GROQ_API_KEY secure in Vercel Environment Variables
-// Features automatic multi-model fallback across active Groq models
+// Features automatic multi-model fallback across active Groq Developer models
 
 const TEXT_MODELS = [
-  "llama-3.3-70b-versatile",
-  "llama3-70b-8192",
-  "llama3-8b-8192",
-  "gemma2-9b-it",
-  "mixtral-8x7b-32768"
+  "openai/gpt-oss-120b",
+  "openai/gpt-oss-20b",
+  "qwen/qwen3.8-27b"
 ];
 
 const VISION_MODELS = [
-  "llama-3.2-11b-vision-preview",
-  "llama-3.2-90b-vision-preview"
+  "qwen/qwen3.8-27b",
+  "openai/gpt-oss-120b"
 ];
 
 module.exports = async function handler(req, res) {
