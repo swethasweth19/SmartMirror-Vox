@@ -373,13 +373,12 @@ let currentPlaylist = [
 let currentSongIndex = 0;
 let musicPlaying = false;
 const audio = new Audio();
-audio.volume = MUSIC_VOLUME; // Loud and clear phone volume
+audio.volume = MUSIC_VOLUME;
 
 audio.onerror = (e) => {
-  console.warn("Audio error on source, trying next stream:", audio.src, e);
-  if (musicPlaying) {
-    nextSong();
-  }
+  console.warn("Audio stream error:", e);
+  audio.pause();
+  audio.src = "";
 };
 audio.onended = () => { nextSong(); };
 
@@ -398,40 +397,38 @@ function playSong(song) {
       document.getElementById('music-status').innerText = '🎵 NOW PLAYING';
       setAIResponse("🎵 Playing: " + song.title);
     }).catch(e => {
-      console.warn("Audio playback failed, attempting fallback track:", e);
-      setTimeout(() => nextSong(), 500);
+      console.warn("Audio playback failed:", e);
     });
   }
 }
 
+let lastMusicQuery = 'Trending hit songs';
+
 function playMusicByLanguage(lang) {
   lang = (lang || '').toLowerCase();
-  let selected = musicPlaylists.english;
+  let query = 'Trending hit songs';
 
   if (lang.includes('kannada') || lang === 'kn-in' || lang === 'kn') {
-    selected = musicPlaylists.kannada;
+    query = 'Kannada top hit songs';
   } else if (lang.includes('hindi') || lang.includes('bollywood') || lang === 'hi-in' || lang === 'hi') {
-    selected = musicPlaylists.hindi;
+    query = 'Bollywood top hit songs';
   } else if (lang.includes('telugu') || lang === 'te-in' || lang === 'te') {
-    selected = musicPlaylists.telugu;
+    query = 'Telugu top melody hit songs';
   } else if (lang.includes('tamil') || lang === 'ta-in' || lang === 'ta') {
-    selected = musicPlaylists.tamil;
+    query = 'Tamil top hit songs';
   } else if (lang.includes('english') || lang.includes('lofi') || lang.includes('pop')) {
-    selected = musicPlaylists.english;
+    query = 'English top hit songs';
   } else {
     // Default based on current language setting
-    if (currentLang === 'kn-IN') selected = musicPlaylists.kannada;
-    else if (currentLang === 'hi-IN') selected = musicPlaylists.hindi;
-    else if (currentLang === 'te-IN') selected = musicPlaylists.telugu;
-    else if (currentLang === 'ta-IN') selected = musicPlaylists.tamil;
-    else selected = musicPlaylists.telugu;
+    if (currentLang === 'kn-IN') query = 'Kannada top hit songs';
+    else if (currentLang === 'hi-IN') query = 'Bollywood top hit songs';
+    else if (currentLang === 'te-IN') query = 'Telugu top melody hit songs';
+    else if (currentLang === 'ta-IN') query = 'Tamil top hit songs';
+    else query = 'Trending hit songs';
   }
 
-  currentPlaylist = selected;
-  currentSongIndex = Math.floor(Math.random() * selected.length);
-  const track = selected[currentSongIndex];
-  setAIResponse("🎵 Playing: " + track.title + (track.lang ? " (" + track.lang + ")" : ""));
-  playSong(track);
+  lastMusicQuery = query;
+  playYouTubeMusic(query);
 }
 
 function extractSpecificSongQuery(text) {
@@ -440,7 +437,7 @@ function extractSpecificSongQuery(text) {
   q = q.replace(/^(hey\s+)?(jarvis|jarvish|java)\s*,?\s*/i, '');
   q = q.replace(/^(please\s+|can\s+you\s+|will\s+you\s+)?/i, '');
 
-  // If general requests, not a specific YouTube song
+  // If general requests, route to language playlists
   const generalPatterns = [
     /^(play\s+)?(music|song|songs|a\s+song|some\s+music|some\s+songs|the\s+music|the\s+song)$/i,
     /^(play\s+)?(telugu|kannada|hindi|tamil|english)\s+(song|songs|music)$/i,
@@ -472,6 +469,7 @@ async function playYouTubeMusic(query) {
   if (!query) return;
   audio.pause();
   audio.src = "";
+  lastMusicQuery = query;
 
   const widget = document.getElementById('music-widget');
   const titleEl = document.getElementById('music-title');
@@ -481,7 +479,7 @@ async function playYouTubeMusic(query) {
 
   if (widget) widget.style.display = 'block';
   if (titleEl) titleEl.innerText = "🔍 " + query;
-  if (statusEl) statusEl.innerText = "⏳ LOADING FROM YOUTUBE...";
+  if (statusEl) statusEl.innerText = "⏳ SEARCHING YOUTUBE...";
   setAIResponse("🔍 Searching YouTube for: " + query + "...");
 
   try {
@@ -499,9 +497,9 @@ async function playYouTubeMusic(query) {
       throw new Error(data.error || "No video found");
     }
   } catch (err) {
-    console.warn("YouTube search failed, playing radio hits fallback:", err);
-    setAIResponse("⚠️ Couldn't find on YouTube, playing top radio hits instead!");
-    playMusicByLanguage('');
+    console.warn("YouTube search failed:", err);
+    setAIResponse("⚠️ Couldn't find video for " + query);
+    if (widget) widget.style.display = 'none';
   }
 }
 
@@ -521,28 +519,35 @@ function stopMusic() {
 
 function pauseMusic() {
   audio.pause();
+  const yf = document.getElementById('youtube-frame');
+  if (yf && yf.contentWindow) {
+    yf.contentWindow.postMessage('{"event":"command","func":"pauseVideo","args":""}', '*');
+  }
   musicPlaying = false;
   document.getElementById('music-status').innerText = '⏸ PAUSED';
   setAIResponse("⏸ Music paused!");
 }
 
 function resumeMusic() {
-  audio.play().catch(e => console.log("Audio error:", e));
+  const yf = document.getElementById('youtube-frame');
+  if (yf && yf.contentWindow && yf.src) {
+    yf.contentWindow.postMessage('{"event":"command","func":"playVideo","args":""}', '*');
+  } else {
+    audio.play().catch(e => console.log("Audio error:", e));
+  }
   musicPlaying = true;
   document.getElementById('music-status').innerText = '🎵 NOW PLAYING';
   setAIResponse("▶ Music resumed!");
 }
 
 function nextSong() {
-  currentSongIndex = (currentSongIndex + 1) % currentPlaylist.length;
-  playSong(currentPlaylist[currentSongIndex]);
-  speakOnce("Playing next song: " + currentPlaylist[currentSongIndex].title);
+  const query = (lastMusicQuery || 'Trending hit songs') + ' hits';
+  playYouTubeMusic(query);
 }
 
 function previousSong() {
-  currentSongIndex = (currentSongIndex - 1 + currentPlaylist.length) % currentPlaylist.length;
-  playSong(currentPlaylist[currentSongIndex]);
-  speakOnce("Playing previous song: " + currentPlaylist[currentSongIndex].title);
+  const query = (lastMusicQuery || 'Trending hit songs');
+  playYouTubeMusic(query);
 }
 
 function toggleMusic() {
