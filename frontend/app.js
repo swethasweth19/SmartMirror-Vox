@@ -102,29 +102,84 @@ function changeLanguage(lang) {
   speakOnce("Language switched to " + langName);
 }
 
-// ========== MUSIC PLAYER ==========
-const songs = [
-  { title: "Chill Lofi Beat", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" },
-  { title: "Ambient Dreams", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3" },
-  { title: "Morning Vibes", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3" },
-  { title: "Evening Calm", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3" },
-  { title: "Focus Mode", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3" }
+// ========== MULTI-LANGUAGE MUSIC PLAYER ==========
+const musicPlaylists = {
+  kannada: [
+    { title: "Radio City Kannada Hits", url: "https://stream.zeno.fm/m3q5v4dvyc9uv", lang: "Kannada" },
+    { title: "Sakkath Kannada Melodies", url: "https://stream.zeno.fm/m3q5v4dvyc9uv", lang: "Kannada" }
+  ],
+  hindi: [
+    { title: "Hits of Bollywood Hindi", url: "https://stream.zeno.fm/8ty8szwpwfeuv", lang: "Hindi" },
+    { title: "Bollywood Chartbusters", url: "https://stream.zeno.fm/8ty8szwpwfeuv", lang: "Hindi" }
+  ],
+  telugu: [
+    { title: "Telugu Super Hits", url: "https://stream.zeno.fm/tW5iyH", lang: "Telugu" }
+  ],
+  tamil: [
+    { title: "Tamil Radio Hits", url: "https://stream.zeno.fm/ZC2E4L", lang: "Tamil" }
+  ],
+  english: [
+    { title: "Chill Lofi Beat", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3", lang: "English" },
+    { title: "Ambient Dreams Acoustic", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3", lang: "English" },
+    { title: "Morning Vibes Pop", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3", lang: "English" },
+    { title: "Evening Calm Groove", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3", lang: "English" },
+    { title: "Focus Mode Synth", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3", lang: "English" }
+  ]
+};
+
+let currentPlaylist = [
+  ...musicPlaylists.hindi,
+  ...musicPlaylists.kannada,
+  ...musicPlaylists.english,
+  ...musicPlaylists.telugu,
+  ...musicPlaylists.tamil
 ];
 
 let currentSongIndex = 0;
 let musicPlaying = false;
 const audio = new Audio();
-audio.volume = 0.3;
+audio.volume = 0.35;
 audio.onended = () => { nextSong(); };
 
-function playMusic() {
-  audio.src = songs[currentSongIndex].url;
-  audio.play().catch(e => console.log("Audio error:", e));
+function playSong(song) {
+  if (!song) song = currentPlaylist[currentSongIndex];
+  audio.src = song.url;
+  audio.play().catch(e => console.log("Audio playback error:", e));
   musicPlaying = true;
   document.getElementById('music-widget').style.display = 'block';
-  document.getElementById('music-title').innerText = songs[currentSongIndex].title;
+  document.getElementById('music-title').innerText = song.title + (song.lang ? ' (' + song.lang + ')' : '');
   document.getElementById('music-status').innerText = '🎵 NOW PLAYING';
-  setAIResponse("🎵 Playing: " + songs[currentSongIndex].title);
+  setAIResponse("🎵 Playing: " + song.title);
+}
+
+function playMusicByLanguage(lang) {
+  lang = (lang || '').toLowerCase();
+  let selected = musicPlaylists.english;
+
+  if (lang.includes('kannada') || lang === 'kn-in' || lang === 'kn') {
+    selected = musicPlaylists.kannada;
+  } else if (lang.includes('hindi') || lang.includes('bollywood') || lang === 'hi-in' || lang === 'hi') {
+    selected = musicPlaylists.hindi;
+  } else if (lang.includes('telugu') || lang === 'te-in' || lang === 'te') {
+    selected = musicPlaylists.telugu;
+  } else if (lang.includes('tamil') || lang === 'ta-in' || lang === 'ta') {
+    selected = musicPlaylists.tamil;
+  } else if (lang.includes('english') || lang.includes('lofi') || lang.includes('pop')) {
+    selected = musicPlaylists.english;
+  } else {
+    // Default based on current language setting
+    if (currentLang === 'kn-IN') selected = musicPlaylists.kannada;
+    else if (currentLang === 'hi-IN') selected = musicPlaylists.hindi;
+    else if (currentLang === 'te-IN') selected = musicPlaylists.telugu;
+    else if (currentLang === 'ta-IN') selected = musicPlaylists.tamil;
+    else selected = musicPlaylists.hindi;
+  }
+
+  currentPlaylist = selected;
+  currentSongIndex = Math.floor(Math.random() * selected.length);
+  const track = selected[currentSongIndex];
+  playSong(track);
+  speakOnce("Playing " + track.title + "!");
 }
 
 function stopMusic() {
@@ -150,24 +205,15 @@ function resumeMusic() {
 }
 
 function nextSong() {
-  currentSongIndex = (currentSongIndex + 1) % songs.length;
-  audio.src = songs[currentSongIndex].url;
-  audio.play().catch(e => console.log("Audio error:", e));
-  musicPlaying = true;
-  document.getElementById('music-title').innerText = songs[currentSongIndex].title;
-  document.getElementById('music-status').innerText = '🎵 NOW PLAYING';
-  document.getElementById('music-widget').style.display = 'block';
-  setAIResponse("🎵 Now playing: " + songs[currentSongIndex].title);
+  currentSongIndex = (currentSongIndex + 1) % currentPlaylist.length;
+  playSong(currentPlaylist[currentSongIndex]);
+  speakOnce("Playing next song: " + currentPlaylist[currentSongIndex].title);
 }
 
 function previousSong() {
-  currentSongIndex = (currentSongIndex - 1 + songs.length) % songs.length;
-  audio.src = songs[currentSongIndex].url;
-  audio.play().catch(e => console.log("Audio error:", e));
-  musicPlaying = true;
-  document.getElementById('music-title').innerText = songs[currentSongIndex].title;
-  document.getElementById('music-widget').style.display = 'block';
-  setAIResponse("🎵 Now playing: " + songs[currentSongIndex].title);
+  currentSongIndex = (currentSongIndex - 1 + currentPlaylist.length) % currentPlaylist.length;
+  playSong(currentPlaylist[currentSongIndex]);
+  speakOnce("Playing previous song: " + currentPlaylist[currentSongIndex].title);
 }
 
 function toggleMusic() {
@@ -179,7 +225,7 @@ function toggleMusic() {
       resumeMusic();
       speakOnce("Music resumed!");
     } else {
-      playMusic();
+      playMusicByLanguage('');
       speakOnce("Playing music for you!");
     }
   }
@@ -193,15 +239,22 @@ function getSystemPrompt() {
     content: `You are Jarvis, a fully capable smart mirror AI assistant. CRITICAL RULES:
 1) Remember full conversation history and refer to previous questions.
 2) If user says 'tell me more', 'explain', 'brief it' - give more details in 4-5 sentences.
-3) Give SHORT answers by default - maximum 2 sentences.
-4) Always be accurate and direct. Give perfectly real information. Act as a true personal assistant.
-5) When checking an outfit, you must evaluate if the outfit suits the person based on real styling logic, suggest improvements, and MOST IMPORTANTLY: suggest accessories based on weather (e.g., if it's sunny, say "take an umbrella to block the sun" or "wear sunglasses"; if it's cold, suggest a jacket). Always proactively add these practical suggestions!
-6) Donald Trump is the 47th US President since January 20 2025.
-7) Narendra Modi is PM of India since 2014.
-8) You CAN generate images, play music, analyze outfits and answer questions.
-9) Never say you cannot do something - always help.
-10) **YOU MUST REPLY IN ${langName.toUpperCase()} LANGUAGE.** The user's current language is set to ${langName}. Always respond in ${langName}. If the user speaks in ${langName}, you MUST reply in ${langName}. This is mandatory.
-11) NAGARJUNA COLLEGE (NCET) KNOWLEDGE BASE - Answer any question about this college using these facts:
+3) For standard factual questions, give concise answers in 2-3 sentences.
+4) **MOVIE RECOMMENDATIONS & SUGGESTIONS:**
+When the user asks for movie suggestions, recommendations, or what to watch:
+- Give 3 to 4 top-rated, exciting movies tailored to their requested language or genre (e.g. Kannada, Hindi/Bollywood, Telugu, Tamil, Hollywood/English, Action, Comedy, Romance, Thriller, Sci-Fi).
+- For Kannada movie requests, suggest acclaimed blockbusters like: KGF (Chapter 1 & 2), Kantara, 777 Charlie, Lucia, Dia, Sapta Saagaradaache Ello, or Ugramm.
+- For Hindi/Bollywood requests, suggest top films like: 3 Idiots, Dangal, Stree 2, Zindagi Na Milegi Dobara, Tumbbad, or Sholay.
+- For English/Hollywood requests, suggest acclaimed titles like: Inception, Interstellar, The Dark Knight, Oppenheimer, or Avengers.
+- Format each with the movie title and a short 1-line reason why it is worth watching.
+5) Always be accurate, enthusiastic, and direct. Act as a true personal assistant.
+6) When checking an outfit, you must evaluate if the outfit suits the person based on real styling logic, suggest improvements, and MOST IMPORTANTLY: suggest accessories based on weather (e.g., if it's sunny, say "take an umbrella to block the sun" or "wear sunglasses"; if it's cold, suggest a jacket). Always proactively add these practical suggestions!
+7) Donald Trump is the 47th US President since January 20 2025.
+8) Narendra Modi is PM of India since 2014.
+9) You CAN play songs in different languages (Hindi, Kannada, Telugu, Tamil, English), suggest movies, analyze outfits, and answer any questions.
+10) Never say you cannot do something - always help and give great recommendations!
+11) **YOU MUST REPLY IN ${langName.toUpperCase()} LANGUAGE.** The user's current language is set to ${langName}. Always respond in ${langName}. If the user speaks in ${langName}, you MUST reply in ${langName}. This is mandatory.
+12) NAGARJUNA COLLEGE (NCET) KNOWLEDGE BASE - Answer any question about this college using these facts:
 - Full name: Nagarjuna College of Engineering and Technology (NCET)
 - Website: https://ncet.co.in
 - Location: Devanahalli, Bangalore, Karnataka, India
@@ -224,7 +277,7 @@ function getSystemPrompt() {
 - Instagram: @ncet_official
 - The college is known as one of the best engineering colleges in Bangalore/Karnataka
 
-12) LIVE DATA ON SCREEN RIGHT NOW (use this to answer questions about current news, weather, etc.):
+13) LIVE DATA ON SCREEN RIGHT NOW (use this to answer questions about current news, weather, etc.):
 Current Weather: ${currentWeatherInfo || 'Not loaded yet'}
 Today's Top Headlines:
 ${currentNewsHeadlines || 'Headlines not loaded yet'}
@@ -491,7 +544,37 @@ function setupRecognition() {
         return;
       }
 
-      // Music commands
+      // Multi-Language Music commands
+      if (
+        t.includes('kannada song') || t.includes('kannada music') || t.includes('play kannada') || t.includes('kannada haadu') || t.includes('kannadadalli haadu')
+      ) {
+        playMusicByLanguage('kannada');
+        return;
+      }
+      if (
+        t.includes('hindi song') || t.includes('bollywood song') || t.includes('hindi music') || t.includes('play hindi') || t.includes('gaana bajao') || t.includes('hindi gaana')
+      ) {
+        playMusicByLanguage('hindi');
+        return;
+      }
+      if (
+        t.includes('telugu song') || t.includes('telugu music') || t.includes('play telugu') || t.includes('telugu paata')
+      ) {
+        playMusicByLanguage('telugu');
+        return;
+      }
+      if (
+        t.includes('tamil song') || t.includes('tamil music') || t.includes('play tamil') || t.includes('tamil paatu')
+      ) {
+        playMusicByLanguage('tamil');
+        return;
+      }
+      if (
+        t.includes('english song') || t.includes('english music') || t.includes('play english') || t.includes('lofi song') || t.includes('pop song')
+      ) {
+        playMusicByLanguage('english');
+        return;
+      }
       if (
         t.includes('play music') ||
         t.includes('play song') ||
@@ -500,10 +583,11 @@ function setupRecognition() {
         t.includes('play a song') ||
         t.includes('music on') ||
         t.includes('play the music') ||
-        t.includes('play the song')
+        t.includes('play the song') ||
+        t.includes('play songs') ||
+        t.includes('haadu haaku')
       ) {
-        playMusic();
-        speakOnce("Playing music for you!");
+        playMusicByLanguage('');
         return;
       }
       if (
@@ -714,6 +798,32 @@ function handleQuestion(question) {
   }
   if (q.includes('speak in english') || q.includes('change language to english') || q.includes('english please')) {
     changeLanguage('en-US');
+    return;
+  }
+
+  // Multi-Language Music commands via question handler
+  if (q.includes('kannada song') || q.includes('kannada music') || q.includes('kannada haadu') || q.includes('play kannada')) {
+    playMusicByLanguage('kannada');
+    return;
+  }
+  if (q.includes('hindi song') || q.includes('bollywood song') || q.includes('hindi music') || q.includes('play hindi') || q.includes('gaana bajao') || q.includes('hindi gaana')) {
+    playMusicByLanguage('hindi');
+    return;
+  }
+  if (q.includes('telugu song') || q.includes('telugu music') || q.includes('play telugu')) {
+    playMusicByLanguage('telugu');
+    return;
+  }
+  if (q.includes('tamil song') || q.includes('tamil music') || q.includes('play tamil')) {
+    playMusicByLanguage('tamil');
+    return;
+  }
+  if (q.includes('english song') || q.includes('lofi song') || q.includes('play english') || q.includes('play pop')) {
+    playMusicByLanguage('english');
+    return;
+  }
+  if (q.includes('play song') || q.includes('play music') || q.includes('haadu haaku')) {
+    playMusicByLanguage('');
     return;
   }
 
