@@ -1,75 +1,83 @@
 <!DOCTYPE html>
 <html>
+
 <head>
   <title>Jarvis Mirror AI</title>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <link rel="stylesheet" href="style.css" />
 </head>
+
 <body>
 
-<div class="mirror" id="main-mirror">
+  <div class="mirror" id="main-mirror">
 
-  <video id="video" autoplay muted></video>
-  <canvas id="canvas"></canvas>
+    <video id="video" autoplay muted></video>
+    <canvas id="canvas"></canvas>
 
-  <div class="widget top-left">
-    <div id="clock">00:00</div>
-    <div id="date">Loading...</div>
-  </div>
-
-  <div id="voice-indicator">🌐 LANG: ENGLISH | 🔊 VOICE: MALE</div>
-
-  <div class="widget top-right">
-    <div id="weather">🌤 --°C</div>
-    <div id="weather-desc">WEATHER</div>
-    <div id="weather-city">BANGALORE, IN</div>
-  </div>
-
-  <div class="widget center">
-    <div id="wake-status">😴 SAY "JARVIS"</div>
-    <div class="pulse-ring" id="pulseRing"></div>
-    <div id="transcript"></div>
-    <div id="loading">⏳ THINKING...</div>
-  </div>
-
-  <div id="music-widget">
-    <div id="music-status">🎵 NOW PLAYING</div>
-    <div id="music-title">Loading...</div>
-    <div class="music-bar">
-      <span></span><span></span><span></span><span></span><span></span>
+    <div class="widget top-left">
+      <div id="clock">00:00</div>
+      <div id="date">Loading...</div>
     </div>
-  </div>
 
-  <div class="widget bottom-left">
-    <div id="news-title">📰 TOP HEADLINES</div>
-    <div id="news-items">Loading news...</div>
-  </div>
+    <div id="voice-indicator">🌐 LANG: ENGLISH | 🔊 VOICE: MALE</div>
 
-  <div class="widget bottom-right">
-    <div id="ai-status">🤖 JARVIS AI MIRROR</div>
-    <div id="ai-response">Ready to assist you!</div>
-  </div>
-
-  <!-- VOICE COMMAND HINTS (subtle, at the bottom) -->
-  <div class="voice-commands-hint" id="voiceHint">
-    <div class="hint-row">
-      <span class="hint-item">🗣 <b>"Jarvis"</b> → Wake up</span>
-      <span class="hint-sep">·</span>
-      <span class="hint-item">🎵 <b>"Play Hindi/Kannada song"</b> → Music</span>
-      <span class="hint-sep">·</span>
-      <span class="hint-item">🎬 <b>"Suggest movies"</b> → Film picks</span>
-      <span class="hint-sep">·</span>
-      <span class="hint-item">👕 <b>"How do I look"</b> → Outfit scan</span>
-      <span class="hint-sep">·</span>
-      <span class="hint-item">🌐 <b>"Speak in Kannada/Hindi"</b> → Language</span>
-      <span class="hint-sep">·</span>
-      <span class="hint-item">😴 <b>"Bye Jarvis"</b> → Sleep</span>
+    <div class="widget top-right">
+      <div id="weather">🌤 --°C</div>
+      <div id="weather-desc">WEATHER</div>
+      <div id="weather-city">BANGALORE, IN</div>
     </div>
+
+    <div class="widget center">
+      <div id="wake-status">😴 SAY "JARVIS"</div>
+      <div class="pulse-ring" id="pulseRing"></div>
+      <div id="transcript"></div>
+      <div id="loading">⏳ THINKING...</div>
+    </div>
+
+    <div id="music-widget">
+      <div id="music-status">🎵 NOW PLAYING</div>
+      <div id="music-title">Loading...</div>
+      <div class="music-bar">
+        <span></span><span></span><span></span><span></span><span></span>
+      </div>
+    </div>
+
+    <!-- YouTube Music & Video Player (for specific requested songs) -->
+    <div id="youtube-player-container">
+      <iframe id="youtube-frame" width="100%" height="100%" src="" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen></iframe>
+    </div>
+
+    <div class="widget bottom-left">
+      <div id="news-title">📰 TOP HEADLINES</div>
+      <div id="news-items">Loading news...</div>
+    </div>
+
+    <div class="widget bottom-right">
+      <div id="ai-status">🤖 JARVIS AI MIRROR</div>
+      <div id="ai-response">Ready to assist you!</div>
+    </div>
+
+    <!-- VOICE COMMAND HINTS (subtle, at the bottom) -->
+    <div class="voice-commands-hint" id="voiceHint">
+      <div class="hint-row">
+        <span class="hint-item">🗣 <b>"Jarvis"</b> → Wake up</span>
+        <span class="hint-sep">·</span>
+        <span class="hint-item">🎵 <b>"Play Hindi/Kannada song"</b> → Music</span>
+        <span class="hint-sep">·</span>
+        <span class="hint-item">🎬 <b>"Suggest movies"</b> → Film picks</span>
+        <span class="hint-sep">·</span>
+        <span class="hint-item">👕 <b>"How do I look"</b> → Outfit scan</span>
+        <span class="hint-sep">·</span>
+        <span class="hint-item">🌐 <b>"Speak in Kannada/Hindi"</b> → Language</span>
+        <span class="hint-sep">·</span>
+        <span class="hint-item">😴 <b>"Bye Jarvis"</b> → Sleep</span>
+      </div>
+    </div>
+
   </div>
 
-</div>
-
-<script src="app.js"></script>
+  <script src="app.js"></script>
 </body>
+
 </html>

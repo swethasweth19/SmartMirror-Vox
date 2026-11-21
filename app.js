@@ -223,85 +223,91 @@ function isStopMusicCommand(text) {
 }
 
 function checkLanguageSwitch(text) {
-  const q = (text || '').toLowerCase();
+  const q = (text || '').toLowerCase().trim();
+  if (!q) return false;
 
-  // Switch to Kannada
+  // Ignore if user is asking for a song, music, movie, or news
   if (
+    q.includes('song') || q.includes('music') || q.includes('play') ||
+    q.includes('paata') || q.includes('haadu') || q.includes('gaana') ||
+    q.includes('paatu') || q.includes('movie') || q.includes('cinema') ||
+    q.includes('news') || q.includes('vartha') || q.includes('samachar')
+  ) {
+    return false;
+  }
+
+  // English triggers (Romanized + Telugu + Kannada + Hindi + Tamil scripts)
+  const isEnglish =
+    q.includes('english') || q.includes('angrezi') || q.includes('angla') ||
+    q.includes('ఇంగ్లీష్') || q.includes('ఇంగ్లీషు') || q.includes('ఆంగ్లం') ||
+    q.includes('ಇಂಗ್ಲಿಷ್') || q.includes('ಆಂಗ್ಲ') ||
+    q.includes('इंग्लिश') || q.includes('अंग्रेजी') || q.includes('अंग्रेज़ी') ||
+    q.includes('ஆங்கிலம்');
+
+  // Telugu triggers
+  const isTelugu =
+    q.includes('telugu') ||
+    q.includes('తెలుగు') ||
+    q.includes('ತೆಲುಗು') ||
+    q.includes('तेलुगु') ||
+    q.includes('தெலுங்கு');
+
+  // Kannada triggers
+  const isKannada =
     q.includes('kannada') ||
     q.includes('ಕನ್ನಡ') ||
+    q.includes('కన్నడ') ||
     q.includes('कन्नड़') ||
-    q.includes('kannadadalli') ||
-    q.includes('kannada dalli') ||
-    q.includes('kannada mathnadu')
-  ) {
-    if (
-      q.includes('speak') || q.includes('change') || q.includes('talk') ||
-      q.includes('switch') || q.includes('bolo') || q.includes('mathnadu') ||
-      q.includes('in kannada') || q.includes('ಮಾತನಾಡು') || q.includes('में बोलो') ||
-      q.includes('ಕನ್ನಡ')
-    ) {
-      changeLanguage('kn-IN');
-      return true;
-    }
-  }
+    q.includes('கன்னடம்');
 
-  // Switch to Hindi
-  if (
+  // Hindi triggers
+  const isHindi =
     q.includes('hindi') ||
-    q.includes('हिंदी') ||
-    q.includes('hindi mein') ||
-    q.includes('hindi me bolo')
-  ) {
-    if (
-      q.includes('speak') || q.includes('change') || q.includes('talk') ||
-      q.includes('switch') || q.includes('bolo') || q.includes('in hindi') ||
-      q.includes('में बोलो') || q.includes('हिंदी')
-    ) {
-      changeLanguage('hi-IN');
-      return true;
-    }
-  }
+    q.includes('हिंदी') || q.includes('हिन्दी') ||
+    q.includes('హిందీ') ||
+    q.includes('ಹಿಂದಿ') ||
+    q.includes('இந்தி');
 
-  // Switch to English
-  if (
-    q.includes('english') ||
-    q.includes('angrezi') ||
-    q.includes('angla') ||
-    q.includes('ಇಂಗ್ಲಿಷ್') ||
-    q.includes('इंग्लिश') ||
-    q.includes('अंग्रेजी')
-  ) {
-    if (
-      q.includes('speak') || q.includes('change') || q.includes('talk') ||
-      q.includes('switch') || q.includes('bolo') || q.includes('mathnadu') ||
-      q.includes('in english') || q.includes('please') || q.includes('ಇಂಗ್ಲಿಷ್') ||
-      q.includes('इंग्लिश')
-    ) {
-      changeLanguage('en-US');
-      return true;
-    }
-  }
+  // Tamil triggers
+  const isTamil =
+    q.includes('tamil') ||
+    q.includes('தமிழ்') ||
+    q.includes('తమిళం') ||
+    q.includes('ತಮಿಳು') ||
+    q.includes('तमिल');
 
-  // Switch to Telugu
-  if (q.includes('telugu') || q.includes('తెలుగు') || q.includes('तेलुगु')) {
-    if (
-      q.includes('speak') || q.includes('change') || q.includes('talk') ||
-      q.includes('switch') || q.includes('telugu lo') || q.includes('తెలుగు')
-    ) {
-      changeLanguage('te-IN');
-      return true;
-    }
-  }
+  // Action verbs or prepositions indicating language switch across all languages:
+  const hasAction =
+    q.includes('speak') || q.includes('talk') || q.includes('switch') || q.includes('change') ||
+    q.includes('bolo') || q.includes('mathnadu') || q.includes('matladu') || q.includes('pesu') ||
+    q.includes('in') || q.includes('lo') || q.includes('dalli') || q.includes('mein') || q.includes('la') ||
+    q.includes('please') || q.includes('jarvis') ||
+    q.includes('మాట్లాడు') || q.includes('మార్చు') || q.includes('లో') || // Telugu
+    q.includes('ಮಾತನಾಡು') || q.includes('ಬದಲಾಯಿಸು') || q.includes('ನಲ್ಲಿ') || // Kannada
+    q.includes('बोलो') || q.includes('बदलो') || q.includes('में') || // Hindi
+    q.includes('பேசு') || q.includes('மாற்று'); // Tamil
 
-  // Switch to Tamil
-  if (q.includes('tamil') || q.includes('தமிழ்') || q.includes('तमिल')) {
-    if (
-      q.includes('speak') || q.includes('change') || q.includes('talk') ||
-      q.includes('switch') || q.includes('tamil la') || q.includes('தமிழ்')
-    ) {
-      changeLanguage('ta-IN');
-      return true;
-    }
+  const wordCount = q.split(/\s+/).length;
+
+  if (isEnglish && (hasAction || wordCount <= 3)) {
+    changeLanguage('en-US');
+    return true;
+  }
+  if (isTelugu && (hasAction || wordCount <= 3)) {
+    changeLanguage('te-IN');
+    return true;
+  }
+  if (isKannada && (hasAction || wordCount <= 3)) {
+    changeLanguage('kn-IN');
+    return true;
+  }
+  if (isHindi && (hasAction || wordCount <= 3)) {
+    changeLanguage('hi-IN');
+    return true;
+  }
+  if (isTamil && (hasAction || wordCount <= 3)) {
+    changeLanguage('ta-IN');
+    return true;
   }
 
   return false;
@@ -428,10 +434,85 @@ function playMusicByLanguage(lang) {
   playSong(track);
 }
 
+function extractSpecificSongQuery(text) {
+  let q = (text || '').trim();
+  // Strip wake words and pleasantries
+  q = q.replace(/^(hey\s+)?(jarvis|jarvish|java)\s*,?\s*/i, '');
+  q = q.replace(/^(please\s+|can\s+you\s+|will\s+you\s+)?/i, '');
+
+  // If general requests, not a specific YouTube song
+  const generalPatterns = [
+    /^(play\s+)?(music|song|songs|a\s+song|some\s+music|some\s+songs|the\s+music|the\s+song)$/i,
+    /^(play\s+)?(telugu|kannada|hindi|tamil|english)\s+(song|songs|music)$/i,
+    /^(play\s+)?(song|songs|music)\s+in\s+(telugu|kannada|hindi|tamil|english)$/i,
+    /^(telugu|kannada|hindi|tamil|english)\s+(song|songs|music)$/i,
+    /^(haadu\s+haaku|gaana\s+bajao|paata\s+paadu|paata\s+veiy)$/i
+  ];
+  for (const pat of generalPatterns) {
+    if (pat.test(q.toLowerCase().trim())) return null;
+  }
+
+  // Pattern: "play <song name>" or "play song <song name>" or "play from youtube <song name>"
+  const playMatch = q.match(/^(?:play|start|put\s+on|sing|stream)\s+(?:the\s+song\s+|song\s+|music\s+|from\s+youtube\s+|on\s+youtube\s+)?(.+)/i);
+  if (playMatch && playMatch[1]) {
+    let song = playMatch[1].trim();
+    song = song.replace(/\s+(on|from)\s+youtube$/i, '');
+    song = song.replace(/\s+(please)$/i, '');
+    if (song.length > 1) return song;
+  }
+
+  // Suffix pattern: "<song name> song play"
+  const suffixMatch = q.match(/^(.+?)\s+(?:song|music|paata|haadu|gaana)\s+(?:play|karo|haaku|paadu)$/i);
+  if (suffixMatch && suffixMatch[1]) return suffixMatch[1].trim();
+
+  return null;
+}
+
+async function playYouTubeMusic(query) {
+  if (!query) return;
+  audio.pause();
+  audio.src = "";
+
+  const widget = document.getElementById('music-widget');
+  const titleEl = document.getElementById('music-title');
+  const statusEl = document.getElementById('music-status');
+  const container = document.getElementById('youtube-player-container');
+  const frame = document.getElementById('youtube-frame');
+
+  if (widget) widget.style.display = 'block';
+  if (titleEl) titleEl.innerText = "🔍 " + query;
+  if (statusEl) statusEl.innerText = "⏳ LOADING FROM YOUTUBE...";
+  setAIResponse("🔍 Searching YouTube for: " + query + "...");
+
+  try {
+    const res = await fetch(`/api/youtube?q=${encodeURIComponent(query)}`);
+    const data = await res.json();
+
+    if (data.success && data.embedUrl) {
+      if (frame) frame.src = data.embedUrl;
+      if (container) container.style.display = 'block';
+      if (titleEl) titleEl.innerText = data.title;
+      if (statusEl) statusEl.innerText = "▶ YOUTUBE MUSIC";
+      musicPlaying = true;
+      setAIResponse("🎵 Playing: " + data.title);
+    } else {
+      throw new Error(data.error || "No video found");
+    }
+  } catch (err) {
+    console.warn("YouTube search failed, playing radio hits fallback:", err);
+    setAIResponse("⚠️ Couldn't find on YouTube, playing top radio hits instead!");
+    playMusicByLanguage('');
+  }
+}
+
 function stopMusic() {
   audio.pause();
   audio.currentTime = 0;
-  audio.src = ""; // Flushes audio buffer and closes network connection immediately
+  audio.src = ""; // Flushes radio audio buffer
+  const yf = document.getElementById('youtube-frame');
+  if (yf) yf.src = "";
+  const yc = document.getElementById('youtube-player-container');
+  if (yc) yc.style.display = 'none';
   musicPlaying = false;
   const widget = document.getElementById('music-widget');
   if (widget) widget.style.display = 'none';
@@ -777,6 +858,13 @@ function setupRecognition() {
         return;
       }
 
+      // Check for specific song requests (YouTube search, e.g. "play Arabic Kuthu", "play Believer")
+      const specificSong = extractSpecificSongQuery(t);
+      if (specificSong) {
+        playYouTubeMusic(specificSong);
+        return;
+      }
+
       // Multi-Language Music commands (handles "play song in telugu", "play telugu song", "play telugu", etc.)
       const isMusicRequest =
         t.includes('song') ||
@@ -921,6 +1009,11 @@ function setupRecognition() {
 }
 
 function interruptAndListen() {
+  if (currentTTSAudio) {
+    currentTTSAudio.pause();
+    currentTTSAudio.src = "";
+    currentTTSAudio = null;
+  }
   window.speechSynthesis.cancel();
   isSpeaking = false;
   isProcessing = false;
@@ -1260,13 +1353,48 @@ async function captureAndAnalyze() {
 }
 
 // ========== SPEAK (TTS) — mic stays ON so user can say "stop" ==========
+let currentTTSAudio = null;
+
+function cleanTextForTTS(text) {
+  if (!text) return '';
+  return text
+    .replace(/[*#_~`>]/g, '')
+    .replace(/\p{Emoji_Presentation}|\p{Extended_Pictographic}/gu, '')
+    .replace(/https?:\/\/\S+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function detectRegionalLang(text) {
+  if (/[\u0C00-\u0C7F]/.test(text)) return 'te'; // Telugu
+  if (/[\u0C80-\u0CFF]/.test(text)) return 'kn'; // Kannada
+  if (/[\u0900-\u097F]/.test(text)) return 'hi'; // Hindi
+  if (/[\u0B80-\u0BFF]/.test(text)) return 'ta'; // Tamil
+  if (currentLang === 'te-IN') return 'te';
+  if (currentLang === 'kn-IN') return 'kn';
+  if (currentLang === 'hi-IN') return 'hi';
+  if (currentLang === 'ta-IN') return 'ta';
+  return null;
+}
+
 function speakOnce(text) {
   speakCount++;
   const myCount = speakCount;
+
+  // Cancel any existing TTS (speech synthesis and cloud audio)
+  if (currentTTSAudio) {
+    currentTTSAudio.pause();
+    currentTTSAudio.src = "";
+    currentTTSAudio = null;
+  }
+  window.speechSynthesis.cancel();
+
+  const clean = cleanTextForTTS(text);
+  if (!clean) return;
+
   // DON'T stop mic — keep it running so user can say "stop" to interrupt
   ignoreInput = true;
   isSpeaking = true;
-  window.speechSynthesis.cancel();
   if (musicPlaying) audio.volume = 0.2;
 
   // Keep mic alive during speech for interrupt detection
@@ -1275,7 +1403,7 @@ function speakOnce(text) {
   }
 
   // Watchdog timer: on Android Chrome, utter.onend sometimes fails to fire
-  const watchdogTime = Math.max(3000, Math.min(12000, (text.length || 20) * 120));
+  const watchdogTime = Math.max(3000, Math.min(14000, clean.length * 120));
   setTimeout(() => {
     if (isSpeaking && myCount === speakCount) {
       isSpeaking = false;
@@ -1290,6 +1418,57 @@ function speakOnce(text) {
     }
   }, watchdogTime);
 
+  // Check if text is in a regional Indian language (Telugu, Kannada, Hindi, Tamil)
+  const regionalCode = detectRegionalLang(clean);
+
+  if (regionalCode) {
+    // Check if device browser has a genuine native voice for this language
+    const voices = window.speechSynthesis.getVoices();
+    const nativeBrowserVoice = voices.find(v => (v.lang || '').toLowerCase().startsWith(regionalCode));
+
+    if (!nativeBrowserVoice) {
+      // Use Google's crystal-clear, authentic native speaker TTS stream
+      const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=${regionalCode}&client=tw-ob&q=${encodeURIComponent(clean.slice(0, 190))}`;
+      const cloudAudio = new Audio(ttsUrl);
+      cloudAudio.volume = 1.0;
+      currentTTSAudio = cloudAudio;
+
+      const finishSpeech = () => {
+        if (myCount === speakCount) {
+          isSpeaking = false;
+          isProcessing = false;
+          if (musicPlaying) audio.volume = MUSIC_VOLUME;
+          setTimeout(() => {
+            ignoreInput = false;
+            if (conversationActive) {
+              setWakeStatus('🟢 JARVIS ACTIVE...');
+              showPulse(true);
+              document.getElementById('transcript').innerText = '';
+            }
+            safeStart();
+          }, 300);
+        }
+      };
+
+      cloudAudio.onended = finishSpeech;
+      cloudAudio.onerror = (e) => {
+        console.warn("Cloud TTS error, trying browser fallback:", e);
+        playBrowserTTS(clean, null, myCount);
+      };
+
+      cloudAudio.play().catch(e => {
+        console.warn("Cloud TTS play blocked, trying browser fallback:", e);
+        playBrowserTTS(clean, null, myCount);
+      });
+      return;
+    }
+  }
+
+  // Browser SpeechSynthesis (for English or when native browser voice exists)
+  playBrowserTTS(clean, null, myCount);
+}
+
+function playBrowserTTS(text, targetVoiceOverride, myCount) {
   setTimeout(() => {
     if (myCount !== speakCount) {
       isSpeaking = false;
@@ -1304,7 +1483,7 @@ function speakOnce(text) {
     utter.lang = currentLang;
 
     const voices = window.speechSynthesis.getVoices();
-    let targetVoice = voices.find(v => v.lang === currentLang || v.lang.replace('_', '-') === currentLang);
+    let targetVoice = targetVoiceOverride || voices.find(v => v.lang === currentLang || v.lang.replace('_', '-') === currentLang);
 
     if (currentLang === 'en-US' || currentLang.startsWith('en')) {
       if (voiceMode === 'female') {
@@ -1345,7 +1524,7 @@ function speakOnce(text) {
           document.getElementById('transcript').innerText = '';
         }
         safeStart();
-      }, 1000);
+      }, 600);
     };
 
     utter.onerror = () => {
@@ -1357,7 +1536,7 @@ function speakOnce(text) {
     };
 
     window.speechSynthesis.speak(utter);
-  }, 150);
+  }, 100);
 }
 
 // ========== VOICE SWITCH (voice-controlled) ==========

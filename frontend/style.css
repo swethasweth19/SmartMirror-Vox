@@ -205,6 +205,31 @@ body {
   overflow-y: auto;
 }
 
+/* ========== YOUTUBE PLAYER CONTAINER ========== */
+#youtube-player-container {
+  position: absolute;
+  bottom: 140px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 320px;
+  height: 180px;
+  z-index: 25;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.9);
+  border: 1px solid rgba(0, 243, 255, 0.5);
+  background: #000;
+  display: none;
+}
+
+@media (max-width: 600px) {
+  #youtube-player-container {
+    width: 280px;
+    height: 158px;
+    bottom: 130px;
+  }
+}
+
 /* ========== MUSIC WIDGET ========== */
 #music-widget {
   position: absolute;
