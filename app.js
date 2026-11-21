@@ -170,38 +170,52 @@ function isSleepCommand(text) {
 
 function isStopMusicCommand(text) {
   const s = (text || '').toLowerCase().trim();
+  if (!s) return false;
+
+  // If user is asking for recommendations, e.g. "top movies", "top songs", "top news", do NOT stop
+  if (
+    s.includes('top movie') ||
+    s.includes('top song') ||
+    s.includes('top news') ||
+    s.includes('top headline') ||
+    s.includes('top rated') ||
+    s.includes('top 10') ||
+    s.includes('top 5')
+  ) {
+    return false;
+  }
+
   return (
-    // English (including common mishearings on phones like "top", "stop", "step")
-    s === 'stop' ||
-    s === 'top' ||
-    s.includes('stop') ||
-    s.includes('top') ||
-    s.includes('pause') ||
+    // English (including common mishearings on phones like "top", "stop", "step", "stopp")
+    /\b(stop|top|pause|step|halt|quiet|enough|stopp|taap)\b/i.test(s) ||
     s.includes('music off') ||
     s.includes('turn off music') ||
-    s.includes('quiet') ||
     s.includes('shut up') ||
-    s.includes('halt') ||
-    s.includes('enough') ||
-    // Hindi
+    // Hindi (Romanized & Devanagari)
     s.includes('band karo') ||
     s.includes('roko') ||
     s.includes('gaana band') ||
     s.includes('ruk jao') ||
     s.includes('बंद करो') ||
     s.includes('रोको') ||
-    // Telugu
+    s.includes('स्टॉप') ||
+    s.includes('टॉप') ||
+    // Telugu (Romanized & Telugu script)
     s.includes('aapu') ||
     s.includes('paata aapu') ||
     s.includes('aagandi') ||
     s.includes('ఆపు') ||
     s.includes('పాట ఆపు') ||
-    // Kannada
+    s.includes('స్టాప్') ||
+    s.includes('టాప్') ||
+    // Kannada (Romanized & Kannada script)
     s.includes('nillsu') ||
     s.includes('nillisi') ||
     s.includes('haadu nillsu') ||
     s.includes('ನಿಲ್ಲಿಸು') ||
     s.includes('ಹಾಡು ನಿಲ್ಲಿಸು') ||
+    s.includes('ಸ್ಟಾಪ್') ||
+    s.includes('ಟಾಪ್') ||
     // Tamil
     s.includes('nirutthu') ||
     s.includes('நிறுத்து')
@@ -314,11 +328,13 @@ function changeLanguage(lang) {
 }
 
 // ========== MULTI-LANGUAGE MUSIC PLAYER ==========
+const MUSIC_VOLUME = 0.9;
+
 const musicPlaylists = {
   telugu: [
     { title: "Telugu Melody Hits", url: "https://a1.asurahosting.com:9580/radio.mp3", lang: "Telugu" },
-    { title: "TeluguOne 24/7 Hits", url: "https://stream.teluguoneradio.com:9700/;stream/1", lang: "Telugu" },
-    { title: "AP9FM Telugu Beats", url: "https://stream.ap9fm.in/radio/8000/radio.mp3", lang: "Telugu" }
+    { title: "AP9FM Telugu Beats", url: "https://stream.ap9fm.in/radio/8000/radio.mp3", lang: "Telugu" },
+    { title: "Telugu Hits Radio", url: "https://stream.zeno.fm/f3wvbbqmdg8uv", lang: "Telugu" }
   ],
   kannada: [
     { title: "Radio City Kannada Hits", url: "https://stream.zeno.fm/m3q5v4dvyc9uv", lang: "Kannada" },
@@ -351,8 +367,7 @@ let currentPlaylist = [
 let currentSongIndex = 0;
 let musicPlaying = false;
 const audio = new Audio();
-audio.volume = 0.85; // Audible volume for phones
-audio.crossOrigin = "anonymous";
+audio.volume = MUSIC_VOLUME; // Loud and clear phone volume
 
 audio.onerror = (e) => {
   console.warn("Audio error on source, trying next stream:", audio.src, e);
@@ -365,8 +380,9 @@ audio.onended = () => { nextSong(); };
 function playSong(song) {
   if (!song) song = currentPlaylist[currentSongIndex];
   audio.pause();
+  audio.removeAttribute('crossorigin');
   audio.src = song.url;
-  audio.volume = 0.85;
+  audio.volume = MUSIC_VOLUME;
   const playPromise = audio.play();
   if (playPromise !== undefined) {
     playPromise.then(() => {
@@ -408,8 +424,8 @@ function playMusicByLanguage(lang) {
   currentPlaylist = selected;
   currentSongIndex = Math.floor(Math.random() * selected.length);
   const track = selected[currentSongIndex];
+  setAIResponse("🎵 Playing: " + track.title + (track.lang ? " (" + track.lang + ")" : ""));
   playSong(track);
-  speakOnce("Playing " + track.title + "!");
 }
 
 function stopMusic() {
@@ -714,7 +730,6 @@ function setupRecognition() {
     // 1. INSTANT STOP FOR MUSIC (Works anytime music is playing! Responds in < 50ms)
     if (musicPlaying && isStopMusicCommand(check)) {
       stopMusic();
-      speakOnce("Music stopped!");
       return;
     }
 
@@ -757,57 +772,57 @@ function setupRecognition() {
       }
 
       // Stop music command in final transcript
-      if (isStopMusicCommand(t)) {
+      if (musicPlaying && isStopMusicCommand(t)) {
         stopMusic();
-        speakOnce("Music stopped!");
         return;
       }
 
-      // Multi-Language Music commands
-      if (
-        t.includes('kannada song') || t.includes('kannada music') || t.includes('play kannada') || t.includes('kannada haadu') || t.includes('kannadadalli haadu')
-      ) {
-        playMusicByLanguage('kannada');
-        return;
-      }
-      if (
-        t.includes('hindi song') || t.includes('bollywood song') || t.includes('hindi music') || t.includes('play hindi') || t.includes('gaana bajao') || t.includes('hindi gaana')
-      ) {
-        playMusicByLanguage('hindi');
-        return;
-      }
-      if (
-        t.includes('telugu song') || t.includes('telugu music') || t.includes('play telugu') || t.includes('telugu paata')
-      ) {
-        playMusicByLanguage('telugu');
-        return;
-      }
-      if (
-        t.includes('tamil song') || t.includes('tamil music') || t.includes('play tamil') || t.includes('tamil paatu')
-      ) {
-        playMusicByLanguage('tamil');
-        return;
-      }
-      if (
-        t.includes('english song') || t.includes('english music') || t.includes('play english') || t.includes('lofi song') || t.includes('pop song')
-      ) {
-        playMusicByLanguage('english');
-        return;
-      }
-      if (
-        t.includes('play music') ||
-        t.includes('play song') ||
-        t.includes('start music') ||
-        t.includes('play some music') ||
-        t.includes('play a song') ||
-        t.includes('music on') ||
-        t.includes('play the music') ||
-        t.includes('play the song') ||
-        t.includes('play songs') ||
-        t.includes('haadu haaku')
-      ) {
-        playMusicByLanguage('');
-        return;
+      // Multi-Language Music commands (handles "play song in telugu", "play telugu song", "play telugu", etc.)
+      const isMusicRequest =
+        t.includes('song') ||
+        t.includes('music') ||
+        t.includes('play') ||
+        t.includes('gaana') ||
+        t.includes('haadu') ||
+        t.includes('paata') ||
+        t.includes('paatu');
+
+      if (isMusicRequest) {
+        if (t.includes('telugu') || t.includes('తెలుగు') || t.includes('paata')) {
+          playMusicByLanguage('telugu');
+          return;
+        }
+        if (t.includes('kannada') || t.includes('ಕನ್ನಡ') || t.includes('haadu')) {
+          playMusicByLanguage('kannada');
+          return;
+        }
+        if (t.includes('hindi') || t.includes('हिंदी') || t.includes('bollywood') || t.includes('gaana')) {
+          playMusicByLanguage('hindi');
+          return;
+        }
+        if (t.includes('tamil') || t.includes('தமிழ்') || t.includes('paatu')) {
+          playMusicByLanguage('tamil');
+          return;
+        }
+        if (t.includes('english') || t.includes('lofi') || t.includes('pop')) {
+          playMusicByLanguage('english');
+          return;
+        }
+        if (
+          t.includes('play music') ||
+          t.includes('play song') ||
+          t.includes('start music') ||
+          t.includes('play some music') ||
+          t.includes('play a song') ||
+          t.includes('music on') ||
+          t.includes('play the music') ||
+          t.includes('play the song') ||
+          t.includes('play songs') ||
+          t.includes('haadu haaku')
+        ) {
+          playMusicByLanguage('');
+          return;
+        }
       }
       if (
         t.includes('stop music') ||
@@ -1252,7 +1267,7 @@ function speakOnce(text) {
   ignoreInput = true;
   isSpeaking = true;
   window.speechSynthesis.cancel();
-  if (musicPlaying) audio.volume = 0.1;
+  if (musicPlaying) audio.volume = 0.2;
 
   // Keep mic alive during speech for interrupt detection
   if (!recognitionRunning) {
@@ -1266,6 +1281,7 @@ function speakOnce(text) {
       isSpeaking = false;
       isProcessing = false;
       ignoreInput = false;
+      if (musicPlaying) audio.volume = MUSIC_VOLUME;
       if (conversationActive) {
         setWakeStatus('🟢 JARVIS ACTIVE...');
         showPulse(true);
@@ -1278,7 +1294,7 @@ function speakOnce(text) {
     if (myCount !== speakCount) {
       isSpeaking = false;
       ignoreInput = false;
-      if (musicPlaying) audio.volume = 0.3;
+      if (musicPlaying) audio.volume = MUSIC_VOLUME;
       return;
     }
 
@@ -1320,7 +1336,7 @@ function speakOnce(text) {
     utter.onend = () => {
       isSpeaking = false;
       isProcessing = false;
-      if (musicPlaying) audio.volume = 0.3;
+      if (musicPlaying) audio.volume = MUSIC_VOLUME;
       setTimeout(() => {
         ignoreInput = false;
         if (conversationActive) {
@@ -1336,7 +1352,7 @@ function speakOnce(text) {
       isSpeaking = false;
       isProcessing = false;
       ignoreInput = false;
-      if (musicPlaying) audio.volume = 0.3;
+      if (musicPlaying) audio.volume = MUSIC_VOLUME;
       safeStart();
     };
 
