@@ -168,6 +168,46 @@ function isSleepCommand(text) {
   );
 }
 
+function isStopMusicCommand(text) {
+  const s = (text || '').toLowerCase().trim();
+  return (
+    // English (including common mishearings on phones like "top", "stop", "step")
+    s === 'stop' ||
+    s === 'top' ||
+    s.includes('stop') ||
+    s.includes('top') ||
+    s.includes('pause') ||
+    s.includes('music off') ||
+    s.includes('turn off music') ||
+    s.includes('quiet') ||
+    s.includes('shut up') ||
+    s.includes('halt') ||
+    s.includes('enough') ||
+    // Hindi
+    s.includes('band karo') ||
+    s.includes('roko') ||
+    s.includes('gaana band') ||
+    s.includes('ruk jao') ||
+    s.includes('बंद करो') ||
+    s.includes('रोको') ||
+    // Telugu
+    s.includes('aapu') ||
+    s.includes('paata aapu') ||
+    s.includes('aagandi') ||
+    s.includes('ఆపు') ||
+    s.includes('పాట ఆపు') ||
+    // Kannada
+    s.includes('nillsu') ||
+    s.includes('nillisi') ||
+    s.includes('haadu nillsu') ||
+    s.includes('ನಿಲ್ಲಿಸು') ||
+    s.includes('ಹಾಡು ನಿಲ್ಲಿಸು') ||
+    // Tamil
+    s.includes('nirutthu') ||
+    s.includes('நிறுத்து')
+  );
+}
+
 function checkLanguageSwitch(text) {
   const q = (text || '').toLowerCase();
 
@@ -275,19 +315,21 @@ function changeLanguage(lang) {
 
 // ========== MULTI-LANGUAGE MUSIC PLAYER ==========
 const musicPlaylists = {
+  telugu: [
+    { title: "Telugu Melody Hits", url: "https://a1.asurahosting.com:9580/radio.mp3", lang: "Telugu" },
+    { title: "TeluguOne 24/7 Hits", url: "https://stream.teluguoneradio.com:9700/;stream/1", lang: "Telugu" },
+    { title: "AP9FM Telugu Beats", url: "https://stream.ap9fm.in/radio/8000/radio.mp3", lang: "Telugu" }
+  ],
   kannada: [
     { title: "Radio City Kannada Hits", url: "https://stream.zeno.fm/m3q5v4dvyc9uv", lang: "Kannada" },
     { title: "Sakkath Kannada Melodies", url: "https://stream.zeno.fm/m3q5v4dvyc9uv", lang: "Kannada" }
   ],
   hindi: [
     { title: "Hits of Bollywood Hindi", url: "https://stream.zeno.fm/8ty8szwpwfeuv", lang: "Hindi" },
-    { title: "Bollywood Chartbusters", url: "https://stream.zeno.fm/8ty8szwpwfeuv", lang: "Hindi" }
-  ],
-  telugu: [
-    { title: "Telugu Super Hits", url: "https://stream.zeno.fm/tW5iyH", lang: "Telugu" }
+    { title: "Radio Mirchi Bollywood", url: "https://eu8.fastcast4u.com/proxy/clyedupq/stream", lang: "Hindi" }
   ],
   tamil: [
-    { title: "Tamil Radio Hits", url: "https://stream.zeno.fm/ZC2E4L", lang: "Tamil" }
+    { title: "Tamil Radio Hits", url: "https://eu8.fastcast4u.com/proxy/clyedupq/stream", lang: "Tamil" }
   ],
   english: [
     { title: "Chill Lofi Beat", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3", lang: "English" },
@@ -309,18 +351,35 @@ let currentPlaylist = [
 let currentSongIndex = 0;
 let musicPlaying = false;
 const audio = new Audio();
-audio.volume = 0.35;
+audio.volume = 0.85; // Audible volume for phones
+audio.crossOrigin = "anonymous";
+
+audio.onerror = (e) => {
+  console.warn("Audio error on source, trying next stream:", audio.src, e);
+  if (musicPlaying) {
+    nextSong();
+  }
+};
 audio.onended = () => { nextSong(); };
 
 function playSong(song) {
   if (!song) song = currentPlaylist[currentSongIndex];
+  audio.pause();
   audio.src = song.url;
-  audio.play().catch(e => console.log("Audio playback error:", e));
-  musicPlaying = true;
-  document.getElementById('music-widget').style.display = 'block';
-  document.getElementById('music-title').innerText = song.title + (song.lang ? ' (' + song.lang + ')' : '');
-  document.getElementById('music-status').innerText = '🎵 NOW PLAYING';
-  setAIResponse("🎵 Playing: " + song.title);
+  audio.volume = 0.85;
+  const playPromise = audio.play();
+  if (playPromise !== undefined) {
+    playPromise.then(() => {
+      musicPlaying = true;
+      document.getElementById('music-widget').style.display = 'block';
+      document.getElementById('music-title').innerText = song.title + (song.lang ? ' (' + song.lang + ')' : '');
+      document.getElementById('music-status').innerText = '🎵 NOW PLAYING';
+      setAIResponse("🎵 Playing: " + song.title);
+    }).catch(e => {
+      console.warn("Audio playback failed, attempting fallback track:", e);
+      setTimeout(() => nextSong(), 500);
+    });
+  }
 }
 
 function playMusicByLanguage(lang) {
@@ -343,7 +402,7 @@ function playMusicByLanguage(lang) {
     else if (currentLang === 'hi-IN') selected = musicPlaylists.hindi;
     else if (currentLang === 'te-IN') selected = musicPlaylists.telugu;
     else if (currentLang === 'ta-IN') selected = musicPlaylists.tamil;
-    else selected = musicPlaylists.hindi;
+    else selected = musicPlaylists.telugu;
   }
 
   currentPlaylist = selected;
@@ -356,8 +415,10 @@ function playMusicByLanguage(lang) {
 function stopMusic() {
   audio.pause();
   audio.currentTime = 0;
+  audio.src = ""; // Flushes audio buffer and closes network connection immediately
   musicPlaying = false;
-  document.getElementById('music-widget').style.display = 'none';
+  const widget = document.getElementById('music-widget');
+  if (widget) widget.style.display = 'none';
   setAIResponse("⏹ Music stopped!");
 }
 
@@ -650,19 +711,16 @@ function setupRecognition() {
     const heard = (finalTranscript || interimTranscript).trim();
     const check = (heard + ' ' + allText).toLowerCase();
 
-    // "Stop" interrupts Jarvis mid-speech — works even while he's talking
+    // 1. INSTANT STOP FOR MUSIC (Works anytime music is playing! Responds in < 50ms)
+    if (musicPlaying && isStopMusicCommand(check)) {
+      stopMusic();
+      speakOnce("Music stopped!");
+      return;
+    }
+
+    // 2. "Stop" interrupts Jarvis mid-speech — works even while he's talking
     if (conversationActive && (isSpeaking || isProcessing)) {
-      if (
-        check.includes('stop') ||
-        check.includes('shut up') ||
-        check.includes('enough') ||
-        check.includes('skip') ||
-        check.includes('cancel') ||
-        check.includes('quiet') ||
-        check.includes('bas') ||       // Hindi: enough
-        check.includes('ruku') ||      // Hindi: stop
-        check.includes('nillsu')       // Kannada: stop
-      ) {
+      if (isStopMusicCommand(check) || check.includes('skip') || check.includes('cancel')) {
         interruptAndListen();
         return;
       }
@@ -695,6 +753,13 @@ function setupRecognition() {
 
       // Language switch commands
       if (checkLanguageSwitch(t)) {
+        return;
+      }
+
+      // Stop music command in final transcript
+      if (isStopMusicCommand(t)) {
+        stopMusic();
+        speakOnce("Music stopped!");
         return;
       }
 
@@ -938,6 +1003,13 @@ function handleQuestion(question) {
   // Sleep command fallback
   if (isSleepCommand(q)) {
     goToSleep();
+    return;
+  }
+
+  // Stop music fallback
+  if (isStopMusicCommand(q)) {
+    stopMusic();
+    speakOnce("Music stopped!");
     return;
   }
 
