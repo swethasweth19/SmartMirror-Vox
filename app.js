@@ -56,7 +56,11 @@ async function callGroqAPI(body) {
       let errDetail = "";
       try {
         const errJson = await res.json();
-        errDetail = errJson.error || JSON.stringify(errJson);
+        if (errJson && errJson.error) {
+          errDetail = typeof errJson.error === 'object' ? (errJson.error.message || JSON.stringify(errJson.error)) : errJson.error;
+        } else {
+          errDetail = JSON.stringify(errJson);
+        }
       } catch (_) {
         errDetail = await res.text();
       }
@@ -793,8 +797,17 @@ async function sendToN8n(question) {
     ignoreInput = false;
     conversationHistory.pop();
 
-    setAIResponse("❌ " + err.message);
-    setTimeout(() => safeStart(), 1000);
+    let displayMsg = err.message;
+    let voiceMsg = err.message;
+
+    if (displayMsg.includes('429')) {
+      displayMsg = "Rate limit reached on AI engine. Retrying in a few seconds...";
+      voiceMsg = "I'm temporarily rate limited. Please ask me again in just a moment!";
+    }
+
+    setAIResponse("❌ " + displayMsg);
+    speakOnce(voiceMsg);
+    setTimeout(() => safeStart(), 1500);
   }
 }
 

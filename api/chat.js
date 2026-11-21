@@ -1,5 +1,11 @@
 // Modern Vercel Serverless Function — proxies requests to Groq API
 // Keeps GROQ_API_KEY secure in Vercel Environment Variables
+// Features automatic fallback across models when rate-limited (HTTP 429)
+
+const FALLBACK_MODELS = [
+  "llama-3.3-70b-versatile",
+  "llama-3.1-8b-instant"
+];
 
 module.exports = async function handler(req, res) {
   // CORS headers
@@ -17,29 +23,64 @@ module.exports = async function handler(req, res) {
   }
 
   if (req.method !== 'POST') {
-    res.status(405).json({ error: 'Method not allowed' });
+    res.status(405).json({ error: { message: 'Method not allowed' } });
     return;
   }
 
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) {
-    res.status(500).json({ error: 'GROQ_API_KEY environment variable is not configured in Vercel settings.' });
+    res.status(500).json({ error: { message: 'GROQ_API_KEY environment variable is not configured in Vercel settings.' } });
     return;
   }
 
   try {
-    const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify(req.body)
-    });
+    const isVision = JSON.stringify(req.body).includes("image_url");
+    const requestedModel = req.body.model || "qwen/qwen3.8-27b";
 
-    const data = await groqResponse.json();
-    res.status(groqResponse.status).json(data);
+    // Build model list: primary model first, followed by fallbacks if not a vision query
+    const modelsToTry = [requestedModel];
+    if (!isVision) {
+      for (const m of FALLBACK_MODELS) {
+        if (!modelsToTry.includes(m)) modelsToTry.push(m);
+      }
+    }
+
+    let lastData = null;
+    let lastStatus = 500;
+
+    for (let i = 0; i < modelsToTry.length; i++) {
+      const model = modelsToTry[i];
+      const payload = { ...req.body, model };
+
+      const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify(payload)
+      });
+
+      lastStatus = groqResponse.status;
+      lastData = await groqResponse.json();
+
+      if (groqResponse.ok) {
+        return res.status(200).json(lastData);
+      }
+
+      // If rate limited (429) or model deprecated/not found (404/400), try fallback model
+      if ((groqResponse.status === 429 || groqResponse.status === 404) && i < modelsToTry.length - 1) {
+        console.warn(`Model ${model} returned ${groqResponse.status}. Attempting fallback to ${modelsToTry[i+1]}...`);
+        continue;
+      }
+
+      // Other error: break and return
+      break;
+    }
+
+    return res.status(lastStatus).json(lastData);
+
   } catch (error) {
-    res.status(500).json({ error: 'Internal server error: ' + error.message });
+    res.status(500).json({ error: { message: 'Internal server error: ' + error.message } });
   }
 };
