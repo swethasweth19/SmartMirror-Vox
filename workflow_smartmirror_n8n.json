@@ -62,7 +62,31 @@
       "position": [800, 220]
     },
     {
-      "parameters": { "assignments": { "assignments": [{ "id": "a4", "name": "reply", "value": "Playing music for you!", "type": "string" }, { "id": "a4b", "name": "song_query", "value": "={{ $json.query }}", "type": "string" }] }, "options": {} },
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a4",
+              "name": "reply",
+              "value": "={{ '🎵 Playing: ' + ($json.query.replace(/^(?:play|start|sing|stream|put on)\\s+(?:the\\s+song\\s+|song\\s+|music\\s+)?/i, '').trim() || 'music') }}",
+              "type": "string"
+            },
+            {
+              "id": "a4b",
+              "name": "song_name",
+              "value": "={{ $json.query.replace(/^(?:play|start|sing|stream|put on)\\s+(?:the\\s+song\\s+|song\\s+|music\\s+)?/i, '').trim() || $json.query }}",
+              "type": "string"
+            },
+            {
+              "id": "a4c",
+              "name": "status",
+              "value": "NOW PLAYING",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
       "id": "set-music",
       "name": "Media Playback Controller",
       "type": "n8n-nodes-base.set",

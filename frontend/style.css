@@ -205,28 +205,6 @@ body {
   overflow-y: auto;
 }
 
-/* ========== YOUTUBE BACKGROUND AUDIO (100% Invisible, no extra screen on mirror) ========== */
-#youtube-player-container {
-  position: fixed;
-  bottom: 0;
-  right: 0;
-  width: 1px;
-  height: 1px;
-  opacity: 0.001;
-  pointer-events: none;
-  z-index: -999;
-  overflow: hidden;
-  border: none;
-  background: transparent;
-}
-
-#youtube-player-container iframe {
-  width: 1px;
-  height: 1px;
-  border: none;
-  opacity: 0.001;
-}
-
 /* ========== MUSIC WIDGET ========== */
 #music-widget {
   position: absolute;
@@ -237,6 +215,7 @@ body {
   text-align: center;
   display: none;
   text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.8);
+  cursor: pointer;
 }
 
 #music-status {

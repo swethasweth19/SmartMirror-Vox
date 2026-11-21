@@ -429,7 +429,7 @@ function playMusicByLanguage(lang) {
   }
 
   lastMusicQuery = query;
-  playYouTubeMusic(query);
+  playDirectMusic(query);
 }
 
 function extractSpecificSongQuery(text) {
@@ -441,6 +441,7 @@ function extractSpecificSongQuery(text) {
   // If general requests, route to language playlists
   const generalPatterns = [
     /^(play\s+)?(music|song|songs|a\s+song|some\s+music|some\s+songs|the\s+music|the\s+song)$/i,
+    /^(play\s+)?(some\s+)?(specific\s+)?(music|song|songs)(\s+in)?\s+(telugu|kannada|hindi|tamil|english)?$/i,
     /^(play\s+)?(telugu|kannada|hindi|tamil|english)\s+(song|songs|music)$/i,
     /^(play\s+)?(song|songs|music)\s+in\s+(telugu|kannada|hindi|tamil|english)$/i,
     /^(telugu|kannada|hindi|tamil|english)\s+(song|songs|music)$/i,
@@ -450,7 +451,7 @@ function extractSpecificSongQuery(text) {
     if (pat.test(q.toLowerCase().trim())) return null;
   }
 
-  // Pattern: "play <song name>" or "play song <song name>" or "play from youtube <song name>"
+  // Pattern: "play <song name>" or "play song <song name>"
   const playMatch = q.match(/^(?:play|start|put\s+on|sing|stream)\s+(?:the\s+song\s+|song\s+|music\s+|from\s+youtube\s+|on\s+youtube\s+)?(.+)/i);
   if (playMatch && playMatch[1]) {
     let song = playMatch[1].trim();
@@ -466,7 +467,7 @@ function extractSpecificSongQuery(text) {
   return null;
 }
 
-async function playYouTubeMusic(query) {
+async function playDirectMusic(query) {
   if (!query) return;
   audio.pause();
   audio.src = "";
@@ -475,42 +476,71 @@ async function playYouTubeMusic(query) {
   const widget = document.getElementById('music-widget');
   const titleEl = document.getElementById('music-title');
   const statusEl = document.getElementById('music-status');
-  const container = document.getElementById('youtube-player-container');
-  const frame = document.getElementById('youtube-frame');
 
   if (widget) widget.style.display = 'block';
-  if (titleEl) titleEl.innerText = "🔍 " + query;
-  if (statusEl) statusEl.innerText = "⏳ SEARCHING YOUTUBE...";
-  setAIResponse("🔍 Searching YouTube for: " + query + "...");
+  if (titleEl) titleEl.innerText = query;
+  if (statusEl) statusEl.innerText = "🎵 NOW PLAYING";
+  setAIResponse("🎵 Playing: " + query);
 
   try {
-    const res = await fetch(`/api/youtube?q=${encodeURIComponent(query)}`);
+    const res = await fetch(`/api/music?q=${encodeURIComponent(query)}`);
     const data = await res.json();
 
-    if (data.success && data.embedUrl) {
-      if (frame) frame.src = data.embedUrl;
-      if (titleEl) titleEl.innerText = data.title;
-      if (statusEl) statusEl.innerText = "▶ YOUTUBE MUSIC";
-      musicPlaying = true;
-      setAIResponse("🎵 Playing: " + data.title);
+    if (data.success && data.audioUrl) {
+      audio.pause();
+      audio.src = data.audioUrl;
+      audio.volume = MUSIC_VOLUME;
+
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        playPromise.then(() => {
+          musicPlaying = true;
+          if (titleEl) titleEl.innerText = data.title;
+          if (statusEl) statusEl.innerText = "🎵 NOW PLAYING";
+          setAIResponse("🎵 Playing: " + data.title);
+        }).catch(err => {
+          console.warn("Direct audio autoplay blocked by browser policy, will resume on touch:", err);
+          musicPlaying = true;
+          if (titleEl) titleEl.innerText = data.title;
+          if (statusEl) statusEl.innerText = "🎵 NOW PLAYING";
+          setAIResponse("🎵 Playing: " + data.title);
+        });
+      }
     } else {
-      throw new Error(data.error || "No video found");
+      throw new Error(data.error || "No audio found");
     }
   } catch (err) {
-    console.warn("YouTube search failed:", err);
-    setAIResponse("⚠️ Couldn't find video for " + query);
-    if (widget) widget.style.display = 'none';
+    console.warn("Music search failed, playing fallback stream:", err);
+    // Regional fallback direct streams
+    const qLower = (query || '').toLowerCase();
+    let fallbackTrack = { title: query, url: "https://stream.zeno.fm/0r0xa792kwzuv" };
+    if (qLower.includes('kannada') || qLower.includes('kn')) {
+      fallbackTrack = { title: "Kannada Melodies", url: "https://node-19.zeno.fm/fk3084x861zuv" };
+    } else if (qLower.includes('telugu') || qLower.includes('te')) {
+      fallbackTrack = { title: "Telugu Melody Hits", url: "https://stream.zeno.fm/cv8u190220hvv" };
+    } else if (qLower.includes('hindi') || qLower.includes('hi')) {
+      fallbackTrack = { title: "Bollywood Hits", url: "https://stream.zeno.fm/f3wvbbqmdg8uv" };
+    } else if (qLower.includes('tamil') || qLower.includes('ta')) {
+      fallbackTrack = { title: "Tamil Top Hits", url: "https://stream.zeno.fm/4w9w238v20hvv" };
+    }
+    audio.src = fallbackTrack.url;
+    audio.play().catch(e => console.warn("Fallback play error:", e));
+    musicPlaying = true;
+    if (titleEl) titleEl.innerText = fallbackTrack.title;
+    if (statusEl) statusEl.innerText = "🎵 NOW PLAYING";
+    setAIResponse("🎵 Playing: " + fallbackTrack.title);
   }
+}
+
+// Transparent alias
+function playYouTubeMusic(query) {
+  return playDirectMusic(query);
 }
 
 function stopMusic() {
   audio.pause();
   audio.currentTime = 0;
-  audio.src = ""; // Flushes radio audio buffer
-  const yf = document.getElementById('youtube-frame');
-  if (yf) yf.src = "";
-  const yc = document.getElementById('youtube-player-container');
-  if (yc) yc.style.display = 'none';
+  audio.src = "";
   musicPlaying = false;
   const widget = document.getElementById('music-widget');
   if (widget) widget.style.display = 'none';
@@ -519,35 +549,30 @@ function stopMusic() {
 
 function pauseMusic() {
   audio.pause();
-  const yf = document.getElementById('youtube-frame');
-  if (yf && yf.contentWindow) {
-    yf.contentWindow.postMessage('{"event":"command","func":"pauseVideo","args":""}', '*');
-  }
   musicPlaying = false;
-  document.getElementById('music-status').innerText = '⏸ PAUSED';
+  const statusEl = document.getElementById('music-status');
+  if (statusEl) statusEl.innerText = '⏸ PAUSED';
   setAIResponse("⏸ Music paused!");
 }
 
 function resumeMusic() {
-  const yf = document.getElementById('youtube-frame');
-  if (yf && yf.contentWindow && yf.src) {
-    yf.contentWindow.postMessage('{"event":"command","func":"playVideo","args":""}', '*');
-  } else {
+  if (audio.src) {
     audio.play().catch(e => console.log("Audio error:", e));
+    musicPlaying = true;
+    const statusEl = document.getElementById('music-status');
+    if (statusEl) statusEl.innerText = '🎵 NOW PLAYING';
+    setAIResponse("▶ Music resumed!");
   }
-  musicPlaying = true;
-  document.getElementById('music-status').innerText = '🎵 NOW PLAYING';
-  setAIResponse("▶ Music resumed!");
 }
 
 function nextSong() {
   const query = (lastMusicQuery || 'Trending hit songs') + ' hits';
-  playYouTubeMusic(query);
+  playDirectMusic(query);
 }
 
 function previousSong() {
   const query = (lastMusicQuery || 'Trending hit songs');
-  playYouTubeMusic(query);
+  playDirectMusic(query);
 }
 
 function toggleMusic() {
@@ -1138,6 +1163,13 @@ function handleQuestion(question) {
   }
   if (q.includes('male voice') || q.includes('switch to male') || q.includes('change to male')) {
     switchVoice('male');
+    return;
+  }
+
+  // Check for specific song requests (e.g. "play Arabic Kuthu", "play Belakina Kavithe", "play Samajavaragamana")
+  const specificSong = extractSpecificSongQuery(q);
+  if (specificSong) {
+    playDirectMusic(specificSong);
     return;
   }
 
