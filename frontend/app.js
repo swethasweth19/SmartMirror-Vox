@@ -11,7 +11,8 @@ const USE_N8N_BACKEND = true; // Set to true to route requests through the n8n o
 const IS_LOCAL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 // Note: Insert your Groq API key here for local offline dev, or configure GROQ_API_KEY in Vercel environment variables
 const GROQ_KEY_LOCAL = localStorage.getItem("GROQ_API_KEY") || "YOUR_GROQ_API_KEY";
-const GROQ_MODEL = "qwen/qwen3.8-27b";
+const GROQ_MODEL = "llama-3.3-70b-versatile";
+const GROQ_VISION_MODEL = "llama-3.2-11b-vision-preview";
 
 // Smart AI Dispatcher: Routes through n8n Workflow Automation when available, with resilient proxy fallback
 async function callGroqAPI(body) {
@@ -488,7 +489,6 @@ async function playYouTubeMusic(query) {
 
     if (data.success && data.embedUrl) {
       if (frame) frame.src = data.embedUrl;
-      if (container) container.style.display = 'block';
       if (titleEl) titleEl.innerText = data.title;
       if (statusEl) statusEl.innerText = "▶ YOUTUBE MUSIC";
       musicPlaying = true;
@@ -1309,7 +1309,7 @@ async function captureAndAnalyze() {
     try {
       // ✅ Call Groq for outfit analysis (uses proxy on Vercel)
       const data = await callGroqAPI({
-        model: GROQ_MODEL,
+        model: GROQ_VISION_MODEL,
         messages: [
           getSystemPrompt(),
           {

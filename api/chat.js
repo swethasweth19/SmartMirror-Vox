@@ -1,10 +1,18 @@
 // Modern Vercel Serverless Function — proxies requests to Groq API
 // Keeps GROQ_API_KEY secure in Vercel Environment Variables
-// Features automatic fallback across models when rate-limited (HTTP 429)
+// Features automatic multi-model fallback across active Groq models
 
-const FALLBACK_MODELS = [
+const TEXT_MODELS = [
   "llama-3.3-70b-versatile",
-  "llama-3.1-8b-instant"
+  "llama3-70b-8192",
+  "llama3-8b-8192",
+  "gemma2-9b-it",
+  "mixtral-8x7b-32768"
+];
+
+const VISION_MODELS = [
+  "llama-3.2-11b-vision-preview",
+  "llama-3.2-90b-vision-preview"
 ];
 
 module.exports = async function handler(req, res) {
@@ -35,14 +43,20 @@ module.exports = async function handler(req, res) {
 
   try {
     const isVision = JSON.stringify(req.body).includes("image_url");
-    const requestedModel = req.body.model || "qwen/qwen3.8-27b";
 
-    // Build model list: primary model first, followed by fallbacks if not a vision query
-    const modelsToTry = [requestedModel];
-    if (!isVision) {
-      for (const m of FALLBACK_MODELS) {
-        if (!modelsToTry.includes(m)) modelsToTry.push(m);
+    // Select the appropriate pool of active Groq models
+    const pool = isVision ? VISION_MODELS : TEXT_MODELS;
+    const requested = req.body.model;
+
+    // Build the ordered fallback list
+    let modelsToTry = [];
+    if (requested && pool.includes(requested)) {
+      modelsToTry.push(requested);
+      for (const m of pool) {
+        if (m !== requested) modelsToTry.push(m);
       }
+    } else {
+      modelsToTry = [...pool];
     }
 
     let lastData = null;
@@ -69,7 +83,7 @@ module.exports = async function handler(req, res) {
       }
 
       // If rate limited (429) or model deprecated/not found (404/400), try fallback model
-      if ((groqResponse.status === 429 || groqResponse.status === 404) && i < modelsToTry.length - 1) {
+      if ((groqResponse.status === 429 || groqResponse.status === 404 || groqResponse.status === 400) && i < modelsToTry.length - 1) {
         console.warn(`Model ${model} returned ${groqResponse.status}. Attempting fallback to ${modelsToTry[i+1]}...`);
         continue;
       }

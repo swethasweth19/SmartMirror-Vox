@@ -205,53 +205,26 @@ body {
   overflow-y: auto;
 }
 
-/* ========== YOUTUBE PLAYER CONTAINER ========== */
+/* ========== YOUTUBE BACKGROUND AUDIO (100% Invisible, no extra screen on mirror) ========== */
 #youtube-player-container {
-  position: absolute;
-  bottom: 140px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 320px;
-  height: 180px;
-  z-index: 25;
-  border-radius: 12px;
+  position: fixed;
+  bottom: 0;
+  right: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0.001;
+  pointer-events: none;
+  z-index: -999;
   overflow: hidden;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.9);
-  border: 1px solid rgba(0, 243, 255, 0.5);
-  background: #000;
-  display: none;
+  border: none;
+  background: transparent;
 }
 
-#youtube-close-btn {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  z-index: 30;
-  background: rgba(0, 0, 0, 0.75);
-  border: 1px solid rgba(0, 243, 255, 0.6);
-  color: #fff;
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  cursor: pointer;
-  font-size: 13px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
-}
-
-#youtube-close-btn:hover {
-  background: rgba(255, 0, 0, 0.85);
-  border-color: #ff4444;
-}
-
-@media (max-width: 600px) {
-  #youtube-player-container {
-    width: 280px;
-    height: 158px;
-    bottom: 130px;
-  }
+#youtube-player-container iframe {
+  width: 1px;
+  height: 1px;
+  border: none;
+  opacity: 0.001;
 }
 
 /* ========== MUSIC WIDGET ========== */
