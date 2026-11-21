@@ -441,7 +441,13 @@ function setupRecognition() {
         check.includes('jarvis') ||
         check.includes('javis') ||
         check.includes('jarwis') ||
-        check.includes('jervis')
+        check.includes('jervis') ||
+        check.includes('jarvish') ||
+        check.includes('service') ||
+        check.includes('hey jarvis') ||
+        check.includes('hey jarvish') ||
+        check.includes('hi jarvis') ||
+        check.includes('wake up')
       ) {
         activateConversation();
       }
@@ -551,18 +557,25 @@ function setupRecognition() {
   recognition.onerror = (event) => {
     recognitionRunning = false;
     if (event.error === 'not-allowed') {
-      setAIResponse('❌ Mic permission denied!');
+      setAIResponse('❌ Mic blocked! Allow mic in browser settings.');
+      return;
+    }
+    if (event.error === 'no-speech') {
+      // Normal pause/silence timeout on mobile
+      if (!fullyAsleep && !isSpeaking && !isProcessing) {
+        safeStart(500);
+      }
       return;
     }
     if (!fullyAsleep && !isSpeaking && !isProcessing) {
-      setTimeout(() => safeStart(), 200);  // Fast restart on error
+      safeStart(800);
     }
   };
 
   recognition.onend = () => {
     recognitionRunning = false;
     if (!fullyAsleep && !isSpeaking && !isProcessing) {
-      setTimeout(() => safeStart(), 100);  // Near-instant restart to keep listening
+      safeStart(400);
     }
   };
 }
@@ -577,16 +590,23 @@ function interruptAndListen() {
   setAIStatus('🎤 LISTENING...');
   showPulse(true);
   document.getElementById('transcript').innerText = '👂 Ask your question...';
-  setTimeout(() => safeStart(), 300);
+  safeStart(300);
 }
 
-function safeStart() {
-  if (recognitionRunning || fullyAsleep) return;
-  try { recognition.start(); }
-  catch(e) { setTimeout(() => safeStart(), 500); }
+let restartTimer = null;
+function safeStart(delay = 300) {
+  if (recognitionRunning || fullyAsleep || isSpeaking || isProcessing) return;
+  if (!recognition) return;
+  if (restartTimer) clearTimeout(restartTimer);
+  restartTimer = setTimeout(() => {
+    try {
+      recognition.start();
+    } catch(e) {}
+  }, delay);
 }
 
 function safeStop() {
+  if (restartTimer) clearTimeout(restartTimer);
   if (!recognitionRunning) return;
   try { recognition.stop(); } catch(e) {}
 }
@@ -604,6 +624,21 @@ function activateConversation() {
   speakOnce("At your service! How can I help you?");
 }
 
+function onCenterTap() {
+  if (!mirrorStarted) {
+    startMirror();
+    return;
+  }
+  if (!conversationActive) {
+    activateConversation();
+  } else if (isSpeaking || isProcessing) {
+    interruptAndListen();
+  } else {
+    safeStart(100);
+  }
+}
+window.onCenterTap = onCenterTap;
+
 function goToSleep() {
   conversationActive = false;
   isProcessing = false;
@@ -618,7 +653,7 @@ function goToSleep() {
   safeStop();
 
   showPulse(false);
-  setWakeStatus('😴 SAY "JARVIS"');
+  setWakeStatus('😴 SAY "JARVIS" OR TAP');
   setAIResponse('Ready to assist you!');
   setAIStatus('🤖 JARVIS AI MIRROR');
   document.getElementById('transcript').innerText = '';
@@ -630,8 +665,8 @@ function goToSleep() {
     isSpeaking = false;
     setTimeout(() => {
       ignoreInput = false;
-      safeStart(); // Restart mic to listen for wake word
-    }, 1000);
+      safeStart(500); // Restart mic to listen for wake word
+    }, 800);
   };
   isSpeaking = true;
   window.speechSynthesis.speak(utter);
@@ -977,11 +1012,28 @@ function blobToBase64(blob) {
   });
 }
 
-// ========== STARTUP (auto-start, no tap needed) ==========
+// ========== STARTUP (Camera, Mic & Permissions) ==========
+let mirrorStarted = false;
+
 function startMirror() {
-  document.getElementById('startup-overlay').style.display = 'none';
+  if (mirrorStarted) return;
+  mirrorStarted = true;
+
+  const overlay = document.getElementById('startup-overlay');
+  if (overlay) overlay.style.display = 'none';
   document.getElementById('main-mirror').style.display = 'block';
 
+  // Pre-warm SpeechSynthesis on user interaction (vital for mobile iOS/Android)
+  if (window.speechSynthesis) {
+    try {
+      const dummy = new SpeechSynthesisUtterance('');
+      dummy.volume = 0;
+      window.speechSynthesis.speak(dummy);
+    } catch(e) {}
+  }
+
+  // CRITICAL FOR MOBILE: audio must be false!
+  // If audio is true, WebRTC steals and locks the phone's microphone, blocking SpeechRecognition!
   navigator.mediaDevices.getUserMedia({
       video: {
         width: { ideal: 1920 },
@@ -989,26 +1041,40 @@ function startMirror() {
         facingMode: 'user',
         frameRate: { ideal: 30 }
       },
-      audio: true
+      audio: false
     })
     .then(stream => {
       document.getElementById('video').srcObject = stream;
       window.stream = stream;
       setupRecognition();
-      setTimeout(() => safeStart(), 300);  // Fast mic start
+      safeStart(400);
       fetchWeather();
       fetchNews();
     })
     .catch(err => {
-      setAIResponse("❌ Camera/Mic error: " + err.message);
+      console.warn("Camera access failed or unavailable:", err);
+      setAIResponse("ℹ️ Camera off or denied. Voice mode active.");
       setupRecognition();
-      setTimeout(() => safeStart(), 300);
+      safeStart(400);
+      fetchWeather();
+      fetchNews();
     });
 }
 
-// Auto-start on page load
+// Auto-start on desktop, prompt tap on mobile for reliable audio/mic permissions
 window.addEventListener('load', () => {
-  startMirror();
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || (window.innerWidth <= 768);
+  if (!isMobile) {
+    startMirror();
+  } else {
+    // Keep overlay visible on mobile so user taps to grant user-gesture permissions
+    const overlay = document.getElementById('startup-overlay');
+    if (overlay) {
+      overlay.style.display = 'flex';
+      const hint = overlay.querySelector('.startup-hint');
+      if (hint) hint.innerText = 'Tap anywhere to enable microphone & camera';
+    }
+  }
 });
 
 // Make startMirror available globally (fallback if overlay is clicked)
