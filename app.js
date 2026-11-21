@@ -90,6 +90,169 @@ const LANG_NAMES = {
   'te-IN': 'Telugu', 'kn-IN': 'Kannada', 'ml-IN': 'Malayalam'
 };
 
+// ========== MULTI-LINGUAL COMMAND DETECTORS ==========
+function isWakeWord(text) {
+  const check = (text || '').toLowerCase();
+  return (
+    // English
+    check.includes('jarvis') ||
+    check.includes('jarvish') ||
+    check.includes('javis') ||
+    check.includes('jarwis') ||
+    check.includes('jervis') ||
+    check.includes('charvis') ||
+    check.includes('travis') ||
+    check.includes('service') ||
+    check.includes('wake up') ||
+    check.includes('hey jarvis') ||
+    check.includes('hey jarvish') ||
+    check.includes('hi jarvis') ||
+    check.includes('hello jarvis') ||
+    // Hindi
+    check.includes('जार्विस') ||
+    check.includes('जार्विश') ||
+    check.includes('जाविस') ||
+    check.includes('हे जार्विस') ||
+    check.includes('उठो') ||
+    // Kannada
+    check.includes('ಜಾರ್ವಿಸ್') ||
+    check.includes('ಜಾರ್ವಿಶ್') ||
+    check.includes('ಜಾವಿಸ್') ||
+    check.includes('ಹೇ ಜಾರ್ವಿಸ್') ||
+    check.includes('ಎದ್ದೇಳು') ||
+    // Telugu & Tamil
+    check.includes('జార్విస్') ||
+    check.includes('ஜார்விஸ்')
+  );
+}
+
+function isSleepCommand(text) {
+  const t = (text || '').toLowerCase();
+  return (
+    // English
+    t.includes('sleep') ||
+    t.includes('bye') ||
+    t.includes('goodbye') ||
+    t.includes('good bye') ||
+    t.includes('stop listening') ||
+    t.includes('turn off') ||
+    t.includes('go to sleep') ||
+    // Hindi (Romanized & Devanagari)
+    t.includes('so jao') ||
+    t.includes('so ja') ||
+    t.includes('alvida') ||
+    t.includes('band karo') ||
+    t.includes('shant raho') ||
+    t.includes('सो जाओ') ||
+    t.includes('सो जा') ||
+    t.includes('अलविदा') ||
+    t.includes('बाय') ||
+    t.includes('स्लीप') ||
+    t.includes('बंद करो') ||
+    // Kannada (Romanized & Kannada script)
+    t.includes('malagu') ||
+    t.includes('nidre') ||
+    t.includes('hogi ba') ||
+    t.includes('nillu') ||
+    t.includes('ಮುಕ್ತಾಯ') ||
+    t.includes('ಮಲಗು') ||
+    t.includes('ನಿದ್ರೆ') ||
+    t.includes('ಹೋಗಿ ಬಾ') ||
+    t.includes('ಬೈ') ||
+    t.includes('ಸ್ಲೀಪ್') ||
+    // Telugu & Tamil
+    t.includes('nidrapo') ||
+    t.includes('నిద్రపో') ||
+    t.includes('thoongu') ||
+    t.includes('தூங்கு')
+  );
+}
+
+function checkLanguageSwitch(text) {
+  const q = (text || '').toLowerCase();
+
+  // Switch to Kannada
+  if (
+    q.includes('kannada') ||
+    q.includes('ಕನ್ನಡ') ||
+    q.includes('कन्नड़') ||
+    q.includes('kannadadalli') ||
+    q.includes('kannada dalli') ||
+    q.includes('kannada mathnadu')
+  ) {
+    if (
+      q.includes('speak') || q.includes('change') || q.includes('talk') ||
+      q.includes('switch') || q.includes('bolo') || q.includes('mathnadu') ||
+      q.includes('in kannada') || q.includes('ಮಾತನಾಡು') || q.includes('में बोलो') ||
+      q.includes('ಕನ್ನಡ')
+    ) {
+      changeLanguage('kn-IN');
+      return true;
+    }
+  }
+
+  // Switch to Hindi
+  if (
+    q.includes('hindi') ||
+    q.includes('हिंदी') ||
+    q.includes('hindi mein') ||
+    q.includes('hindi me bolo')
+  ) {
+    if (
+      q.includes('speak') || q.includes('change') || q.includes('talk') ||
+      q.includes('switch') || q.includes('bolo') || q.includes('in hindi') ||
+      q.includes('में बोलो') || q.includes('हिंदी')
+    ) {
+      changeLanguage('hi-IN');
+      return true;
+    }
+  }
+
+  // Switch to English
+  if (
+    q.includes('english') ||
+    q.includes('angrezi') ||
+    q.includes('angla') ||
+    q.includes('ಇಂಗ್ಲಿಷ್') ||
+    q.includes('इंग्लिश') ||
+    q.includes('अंग्रेजी')
+  ) {
+    if (
+      q.includes('speak') || q.includes('change') || q.includes('talk') ||
+      q.includes('switch') || q.includes('bolo') || q.includes('mathnadu') ||
+      q.includes('in english') || q.includes('please') || q.includes('ಇಂಗ್ಲಿಷ್') ||
+      q.includes('इंग्लिश')
+    ) {
+      changeLanguage('en-US');
+      return true;
+    }
+  }
+
+  // Switch to Telugu
+  if (q.includes('telugu') || q.includes('తెలుగు') || q.includes('तेलुगु')) {
+    if (
+      q.includes('speak') || q.includes('change') || q.includes('talk') ||
+      q.includes('switch') || q.includes('telugu lo') || q.includes('తెలుగు')
+    ) {
+      changeLanguage('te-IN');
+      return true;
+    }
+  }
+
+  // Switch to Tamil
+  if (q.includes('tamil') || q.includes('தமிழ்') || q.includes('तमिल')) {
+    if (
+      q.includes('speak') || q.includes('change') || q.includes('talk') ||
+      q.includes('switch') || q.includes('tamil la') || q.includes('தமிழ்')
+    ) {
+      changeLanguage('ta-IN');
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function changeLanguage(lang) {
   currentLang = lang;
   const langName = LANG_NAMES[lang] || 'English';
@@ -97,9 +260,17 @@ function changeLanguage(lang) {
   if (recognition) {
     recognition.lang = currentLang;
     safeStop();
-    setTimeout(() => safeStart(), 500);
+    setTimeout(() => safeStart(200), 400);
   }
-  speakOnce("Language switched to " + langName);
+
+  let switchMsg = "Language switched to " + langName;
+  if (lang === 'hi-IN') switchMsg = "भाषा हिंदी में बदल दी गई है";
+  else if (lang === 'kn-IN') switchMsg = "ಭಾಷೆಯನ್ನು ಕನ್ನಡಕ್ಕೆ ಬದಲಾಯಿಸಲಾಗಿದೆ";
+  else if (lang === 'te-IN') switchMsg = "భాష తెలుగులోకి మార్చబడింది";
+  else if (lang === 'ta-IN') switchMsg = "மொழி தமிழுக்கு மாற்றப்பட்டது";
+
+  setAIResponse(switchMsg);
+  speakOnce(switchMsg);
 }
 
 // ========== MULTI-LANGUAGE MUSIC PLAYER ==========
@@ -506,22 +677,7 @@ function setupRecognition() {
 
     // Wake word detection (when asleep) — uses INTERIM and FINAL results for instant response
     if (!conversationActive) {
-      const isWake =
-        check.includes('jarvis') ||
-        check.includes('jarvish') ||
-        check.includes('javis') ||
-        check.includes('jarwis') ||
-        check.includes('jervis') ||
-        check.includes('charvis') ||
-        check.includes('travis') ||
-        check.includes('service') ||
-        check.includes('wake up') ||
-        check.includes('hey jarvis') ||
-        check.includes('hey jarvish') ||
-        check.includes('hi jarvis') ||
-        check.includes('hello jarvis');
-
-      if (isWake) {
+      if (isWakeWord(check)) {
         activateConversation();
       }
       return;
@@ -532,15 +688,13 @@ function setupRecognition() {
       const t = finalTranscript.trim().toLowerCase();
 
       // Sleep commands
-      if (
-        t.includes('bye jarvis') ||
-        t.includes('goodbye jarvis') ||
-        t.includes('sleep jarvis') ||
-        t.includes('bye bye') ||
-        t.includes('goodbye') ||
-        t.includes('sleep')
-      ) {
+      if (isSleepCommand(t)) {
         goToSleep();
+        return;
+      }
+
+      // Language switch commands
+      if (checkLanguageSwitch(t)) {
         return;
       }
 
@@ -751,15 +905,27 @@ function goToSleep() {
   setAIStatus('🤖 JARVIS AI MIRROR');
   document.getElementById('transcript').innerText = '';
 
-  const utter = new SpeechSynthesisUtterance("Goodbye! Say Jarvis when you need me!");
+  let byeMsg = "Goodbye! Say Jarvis when you need me!";
+  if (currentLang === 'hi-IN') byeMsg = "अलविदा! जब भी ज़रूरत हो, जार्विस बोलें!";
+  else if (currentLang === 'kn-IN') byeMsg = "ವಿದಾಯ! ನಿಮಗೆ ಅಗತ್ಯವಿದ್ದಾಗ ಜಾರ್ವಿಸ್ ಎಂದು ಹೇಳಿ!";
+  else if (currentLang === 'te-IN') byeMsg = "సెలవు! మీకు అవసరమైనప్పుడు జార్విస్ అని చెప్పండి!";
+  else if (currentLang === 'ta-IN') byeMsg = "விடைபெறுகிறேன்! தேவைப்படும்போது ஜார்விஸ் என்று சொல்லுங்கள்!";
+
+  const utter = new SpeechSynthesisUtterance(byeMsg);
   utter.rate = 1.0;
   utter.volume = 1;
+  utter.lang = currentLang;
   utter.onend = () => {
     isSpeaking = false;
     setTimeout(() => {
       ignoreInput = false;
       safeStart(300); // Restart mic to listen for wake word
     }, 500);
+  };
+  utter.onerror = () => {
+    isSpeaking = false;
+    ignoreInput = false;
+    safeStart(300);
   };
   isSpeaking = true;
   window.speechSynthesis.speak(utter);
@@ -769,6 +935,17 @@ function goToSleep() {
 function handleQuestion(question) {
   const q = question.toLowerCase();
 
+  // Sleep command fallback
+  if (isSleepCommand(q)) {
+    goToSleep();
+    return;
+  }
+
+  // Language switch commands
+  if (checkLanguageSwitch(q)) {
+    return;
+  }
+
   // Voice switch commands
   if (q.includes('lisa') || q.includes('female voice') || q.includes('switch to female') || q.includes('change to female')) {
     switchVoice('female');
@@ -776,28 +953,6 @@ function handleQuestion(question) {
   }
   if (q.includes('male voice') || q.includes('switch to male') || q.includes('change to male')) {
     switchVoice('male');
-    return;
-  }
-
-  // Language switch commands
-  if (q.includes('speak in hindi') || q.includes('change language to hindi') || q.includes('hindi me bolo') || q.includes('hindi mein')) {
-    changeLanguage('hi-IN');
-    return;
-  }
-  if (q.includes('speak in tamil') || q.includes('change language to tamil')) {
-    changeLanguage('ta-IN');
-    return;
-  }
-  if (q.includes('speak in telugu') || q.includes('change language to telugu') || q.includes('telugu lo') || q.includes('telugu matladu')) {
-    changeLanguage('te-IN');
-    return;
-  }
-  if (q.includes('speak in kannada') || q.includes('change language to kannada') || q.includes('kannada dalli') || q.includes('kannada mathnadu')) {
-    changeLanguage('kn-IN');
-    return;
-  }
-  if (q.includes('speak in english') || q.includes('change language to english') || q.includes('english please')) {
-    changeLanguage('en-US');
     return;
   }
 
