@@ -11,19 +11,24 @@ const USE_N8N_BACKEND = true; // Set to true to route requests through the n8n o
 const IS_LOCAL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 // Note: Insert your Groq API key here for local offline dev, or configure GROQ_API_KEY in Vercel environment variables
 const GROQ_KEY_LOCAL = localStorage.getItem("GROQ_API_KEY") || "YOUR_GROQ_API_KEY";
-const GROQ_MODEL = "openai/gpt-oss-120b";
-const GROQ_VISION_MODEL = "qwen/qwen3.8-27b";
+const GROQ_MODEL = "llama-3.1-8b-instant";
+const GROQ_FALLBACK_MODEL = "llama-3.3-70b-versatile";
+const GROQ_VISION_MODEL = "llama-3.2-11b-vision-preview";
 
 // Smart AI Dispatcher: Routes through n8n Workflow Automation when available, with resilient proxy fallback
 async function callGroqAPI(body) {
-  // If n8n mode is enabled on localhost, try the n8n workflow pipeline
+  // If n8n mode is enabled on localhost, try the n8n workflow pipeline with a fast 1.5s timeout
   if (USE_N8N_BACKEND && IS_LOCAL) {
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 1500);
       const n8nRes = await fetch(N8N_WEBHOOK_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
+        body: JSON.stringify(body),
+        signal: controller.signal
       });
+      clearTimeout(timeoutId);
       if (n8nRes.ok) {
         const n8nData = await n8nRes.json();
         if (n8nData && (n8nData.reply || n8nData.response || (n8nData.choices && n8nData.choices[0]))) {
@@ -31,22 +36,32 @@ async function callGroqAPI(body) {
         }
       }
     } catch (e) {
-      console.log("n8n offline or unrouted, using direct AI engine fallback:", e);
+      // Offline or timed out - seamlessly continue to direct AI engine
     }
   }
 
   // Direct Groq execution (Local / Cloud Serverless Proxy)
   if (IS_LOCAL) {
-    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    try {
+      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + GROQ_KEY_LOCAL
+        },
+        body: JSON.stringify(body)
+      });
+      if (res.ok) return await res.json();
+    } catch (_) {}
+
+    // Fallback to proxy
+    const fallbackRes = await fetch('/api/chat', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + GROQ_KEY_LOCAL
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     });
-    if (!res.ok) throw new Error("Groq API error: " + res.status);
-    return await res.json();
+    if (!fallbackRes.ok) throw new Error("Groq API error: " + fallbackRes.status);
+    return await fallbackRes.json();
   } else {
     const res = await fetch('/api/chat', {
       method: 'POST',
@@ -123,7 +138,14 @@ function isWakeWord(text) {
     check.includes('ಎದ್ದೇಳು') ||
     // Telugu & Tamil
     check.includes('జార్విస్') ||
-    check.includes('ஜார்விஸ்')
+    check.includes('జర్విస్') ||
+    check.includes('జావిస్') ||
+    check.includes('లే') ||
+    check.includes('ஜார்விஸ்') ||
+    check.includes('சார்விஸ்') ||
+    check.includes('ஜார்வி') ||
+    check.includes('சார்விஷ்') ||
+    check.includes('எழுந்திரு')
   );
 }
 
@@ -187,10 +209,11 @@ function isStopMusicCommand(text) {
   }
 
   return (
-    // English (including common mishearings on phones like "top", "stop", "step", "stopp")
+    // English
     /\b(stop|top|pause|step|halt|quiet|enough|stopp|taap)\b/i.test(s) ||
     s.includes('music off') ||
     s.includes('turn off music') ||
+    s.includes('stop the music') ||
     s.includes('shut up') ||
     // Hindi (Romanized & Devanagari)
     s.includes('band karo') ||
@@ -219,95 +242,106 @@ function isStopMusicCommand(text) {
     s.includes('ಟಾಪ್') ||
     // Tamil
     s.includes('nirutthu') ||
-    s.includes('நிறுத்து')
+    s.includes('paattu nirutthu') ||
+    s.includes('நிறுத்து') ||
+    s.includes('பாட்டு நிறுத்து')
   );
 }
 
+// ========== FAST BIDIRECTIONAL LANGUAGE SWITCHING ==========
 function checkLanguageSwitch(text) {
   const q = (text || '').toLowerCase().trim();
   if (!q) return false;
 
-  // Ignore if user is asking for a song, music, movie, or news
+  // Never trigger language switch if user is specifically requesting music, songs, or news
   if (
     q.includes('song') || q.includes('music') || q.includes('play') ||
     q.includes('paata') || q.includes('haadu') || q.includes('gaana') ||
-    q.includes('paatu') || q.includes('movie') || q.includes('cinema') ||
-    q.includes('news') || q.includes('vartha') || q.includes('samachar')
+    q.includes('paatu') || q.includes('paadal') || q.includes('movie') ||
+    q.includes('cinema') || q.includes('film') || q.includes('news') ||
+    q.includes('vartha') || q.includes('samachar') ||
+    (/[\u0B80-\u0BFF]/.test(q) && (q.includes('பாட்டு') || q.includes('பாடல்'))) ||
+    (/[\u0C00-\u0C7F]/.test(q) && q.includes('పాట')) ||
+    (/[\u0C80-\u0CFF]/.test(q) && q.includes('ಹಾಡು')) ||
+    (/[\u0900-\u097F]/.test(q) && (q.includes('गाना') || q.includes('फिल्म')))
   ) {
     return false;
   }
 
-  // English triggers (Romanized + Telugu + Kannada + Hindi + Tamil scripts)
+  // 1. Tamil patterns
+  const isTamil =
+    q.includes('tamil') || q.includes('tamizh') || q.includes('thamil') ||
+    q.includes('தமிழ்') || q.includes('தமில்') || q.includes('தமில') ||
+    q.includes('தமில்ல') || q.includes('சுவிட்ச் டு தமிழ்') ||
+    q.includes('தமிழுக்கு') || q.includes('தமில பேசு') ||
+    q.includes('తమిళం') || q.includes('ತಮಿಳು') || q.includes('तमिल');
+
+  // 2. Telugu patterns
+  const isTelugu =
+    q.includes('telugu') || q.includes('thelungu') ||
+    q.includes('తెలుగు') || q.includes('తెలుంగు') ||
+    q.includes('స్విచ్ టు తెలుగు') || q.includes('తెలుగుకి') ||
+    q.includes('ತೆಲುಗು') || q.includes('तेलुगु') || q.includes('தெலுங்கு');
+
+  // 3. Kannada patterns
+  const isKannada =
+    q.includes('kannada') || q.includes('kannad') ||
+    q.includes('ಕನ್ನಡ') || q.includes('ಕನ್ನಡ್') ||
+    q.includes('ಸ್ವಿಚ್ ಟು ಕನ್ನಡ') || q.includes('ಕನ್ನಡಕ್ಕೆ') ||
+    q.includes('కన్నడ') || q.includes('कन्नड़') || q.includes('கன்னடம்');
+
+  // 4. Hindi patterns
+  const isHindi =
+    q.includes('hindi') || q.includes('hindhi') ||
+    q.includes('हिंदी') || q.includes('हिन्दी') ||
+    q.includes('स्विच टू हिंदी') || q.includes('हिंदी में') ||
+    q.includes('హిందీ') || q.includes('ಹಿಂದಿ') || q.includes('இந்தி');
+
+  // 5. English patterns
   const isEnglish =
     q.includes('english') || q.includes('angrezi') || q.includes('angla') ||
+    q.includes('ஆங்கிலம்') || q.includes('இங்கிலீஷ்') ||
+    q.includes('சுவிட்ச் டு ஆங்கிலம்') || q.includes('சுவிட்ச் டு இங்கிலீஷ்') ||
     q.includes('ఇంగ్లీష్') || q.includes('ఇంగ్లీషు') || q.includes('ఆంగ్లం') ||
+    q.includes('స్విచ్ టు ఇంగ్లీష్') ||
     q.includes('ಇಂಗ್ಲಿಷ್') || q.includes('ಆಂಗ್ಲ') ||
+    q.includes('ಸ್ವಿಚ್ ಟು ಇಂಗ್ಲಿಷ್') ||
     q.includes('इंग्लिश') || q.includes('अंग्रेजी') || q.includes('अंग्रेज़ी') ||
-    q.includes('ஆங்கிலம்');
+    q.includes('स्विच टू इंग्लिश');
 
-  // Telugu triggers
-  const isTelugu =
-    q.includes('telugu') ||
-    q.includes('తెలుగు') ||
-    q.includes('ತೆಲುಗು') ||
-    q.includes('तेलुगु') ||
-    q.includes('தெலுங்கு');
+  // Action verbs or prepositions indicating intent to switch
+  const hasSwitchIntent =
+    q.includes('switch') || q.includes('change') || q.includes('turn') ||
+    q.includes('speak') || q.includes('talk') || q.includes('bolo') ||
+    q.includes('pesu') || q.includes('matladu') || q.includes('mathnadu') ||
+    q.includes('in') || q.includes('to') || q.includes('into') || q.includes('lo') ||
+    q.includes('mein') || q.includes('dalli') || q.includes('la') || q.includes('ku') ||
+    q.includes('சுவிட்ச்') || q.includes('மாற்று') || q.includes('மாத்து') || q.includes('பேசு') ||
+    q.includes('స్విచ్') || q.includes('మార్చు') || q.includes('మాట్లాడు') ||
+    q.includes('ಸ್ವಿಚ್') || q.includes('ಬದಲಾಯಿಸು') || q.includes('ಮಾತನಾಡು') ||
+    q.includes('स्विच') || q.includes('बदलो') || q.includes('बोलो');
 
-  // Kannada triggers
-  const isKannada =
-    q.includes('kannada') ||
-    q.includes('ಕನ್ನಡ') ||
-    q.includes('కన్నడ') ||
-    q.includes('कन्नड़') ||
-    q.includes('கன்னடம்');
+  const words = q.split(/\s+/).filter(Boolean);
+  const wordCount = words.length;
 
-  // Hindi triggers
-  const isHindi =
-    q.includes('hindi') ||
-    q.includes('हिंदी') || q.includes('हिन्दी') ||
-    q.includes('హిందీ') ||
-    q.includes('ಹಿಂದಿ') ||
-    q.includes('இந்தி');
-
-  // Tamil triggers
-  const isTamil =
-    q.includes('tamil') ||
-    q.includes('தமிழ்') ||
-    q.includes('తమిళం') ||
-    q.includes('ತಮಿಳು') ||
-    q.includes('तमिल');
-
-  // Action verbs or prepositions indicating language switch across all languages:
-  const hasAction =
-    q.includes('speak') || q.includes('talk') || q.includes('switch') || q.includes('change') ||
-    q.includes('bolo') || q.includes('mathnadu') || q.includes('matladu') || q.includes('pesu') ||
-    q.includes('in') || q.includes('lo') || q.includes('dalli') || q.includes('mein') || q.includes('la') ||
-    q.includes('please') || q.includes('jarvis') ||
-    q.includes('మాట్లాడు') || q.includes('మార్చు') || q.includes('లో') || // Telugu
-    q.includes('ಮಾತನಾಡು') || q.includes('ಬದಲಾಯಿಸು') || q.includes('ನಲ್ಲಿ') || // Kannada
-    q.includes('बोलो') || q.includes('बदलो') || q.includes('में') || // Hindi
-    q.includes('பேசு') || q.includes('மாற்று'); // Tamil
-
-  const wordCount = q.split(/\s+/).length;
-
-  if (isEnglish && (hasAction || wordCount <= 3)) {
-    changeLanguage('en-US');
+  if (isTamil && (hasSwitchIntent || wordCount <= 3)) {
+    changeLanguage('ta-IN');
     return true;
   }
-  if (isTelugu && (hasAction || wordCount <= 3)) {
+  if (isTelugu && (hasSwitchIntent || wordCount <= 3)) {
     changeLanguage('te-IN');
     return true;
   }
-  if (isKannada && (hasAction || wordCount <= 3)) {
+  if (isKannada && (hasSwitchIntent || wordCount <= 3)) {
     changeLanguage('kn-IN');
     return true;
   }
-  if (isHindi && (hasAction || wordCount <= 3)) {
+  if (isHindi && (hasSwitchIntent || wordCount <= 3)) {
     changeLanguage('hi-IN');
     return true;
   }
-  if (isTamil && (hasAction || wordCount <= 3)) {
-    changeLanguage('ta-IN');
+  if (isEnglish && (hasSwitchIntent || wordCount <= 3)) {
+    changeLanguage('en-US');
     return true;
   }
 
@@ -315,64 +349,101 @@ function checkLanguageSwitch(text) {
 }
 
 function changeLanguage(lang) {
+  if (!lang || !LANG_NAMES[lang]) return;
   currentLang = lang;
   const langName = LANG_NAMES[lang] || 'English';
-  document.getElementById('voice-indicator').innerText = '🌐 LANG: ' + langName.toUpperCase() + ' | 🔊 VOICE: ' + (voiceMode === 'female' ? 'LISA' : 'MALE');
-  if (recognition) {
-    recognition.lang = currentLang;
-    safeStop();
-    setTimeout(() => safeStart(200), 400);
+
+  // 1. Update UI Indicator instantly
+  const voiceInd = document.getElementById('voice-indicator');
+  if (voiceInd) {
+    voiceInd.innerText = '🌐 LANG: ' + langName.toUpperCase() + ' | 🔊 VOICE: ' + (voiceMode === 'female' ? 'LISA' : 'MALE');
   }
 
+  // 2. Clear stale history and activate conversation
+  conversationHistory = [];
+  conversationActive = true;
+  setWakeStatus('🟢 JARVIS ACTIVE (' + langName.toUpperCase() + ')');
+  showPulse(true);
+
+  // 3. Reconfigure Speech Recognition language instantly
+  if (recognition) {
+    recognition.lang = currentLang;
+    try { recognition.stop(); } catch(e) {}
+    recognitionRunning = false;
+  }
+
+  // 4. Snappy confirmation
   let switchMsg = "Language switched to " + langName;
   if (lang === 'hi-IN') switchMsg = "भाषा हिंदी में बदल दी गई है";
   else if (lang === 'kn-IN') switchMsg = "ಭಾಷೆಯನ್ನು ಕನ್ನಡಕ್ಕೆ ಬದಲಾಯಿಸಲಾಗಿದೆ";
   else if (lang === 'te-IN') switchMsg = "భాష తెలుగులోకి మార్చబడింది";
   else if (lang === 'ta-IN') switchMsg = "மொழி தமிழுக்கு மாற்றப்பட்டது";
 
+  setAIStatus("🌐 " + langName.toUpperCase());
   setAIResponse(switchMsg);
-  speakOnce(switchMsg);
+
+  // 5. Fast non-blocking speech confirmation and immediate mic start
+  speakOnce(switchMsg, () => {
+    safeStart(100);
+  });
 }
 
-// ========== MULTI-LANGUAGE MUSIC PLAYER ==========
+// ========== MULTI-LANGUAGE DIRECT AUDIO ENGINE ==========
 const MUSIC_VOLUME = 0.9;
 
-const musicPlaylists = {
+const TOP_HITS_BY_LANG = {
+  tamil: [
+    'Arabic Kuthu - Halamithi Habibo',
+    'Hukum - Thalaivar Alappara',
+    'Naa Ready Leo',
+    'Kaavaalaa Jailer',
+    'Rowdy Baby Maari 2',
+    'Vaathi Coming Master',
+    'Hayyoda Jawan',
+    'Chilla Chilla Thunivu'
+  ],
   telugu: [
-    { title: "Telugu Melody Hits", url: "https://a1.asurahosting.com:9580/radio.mp3", lang: "Telugu" },
-    { title: "AP9FM Telugu Beats", url: "https://stream.ap9fm.in/radio/8000/radio.mp3", lang: "Telugu" },
-    { title: "Telugu Hits Radio", url: "https://stream.zeno.fm/f3wvbbqmdg8uv", lang: "Telugu" }
+    'Samajavaragamana Ala Vaikunthapurramuloo',
+    'Pushpa Pushpa Telugu',
+    'Oo Antava Mawa Pushpa',
+    'Butta Bomma',
+    'Ramuloo Ramulaa',
+    'Naatu Naatu RRR',
+    'Inkem Inkem Inkem Kaavaale',
+    'Srivalli Pushpa Telugu'
   ],
   kannada: [
-    { title: "Radio City Kannada Hits", url: "https://stream.zeno.fm/m3q5v4dvyc9uv", lang: "Kannada" },
-    { title: "Sakkath Kannada Melodies", url: "https://stream.zeno.fm/m3q5v4dvyc9uv", lang: "Kannada" }
+    'Belakina Kavithe',
+    'Ra Ra Rakkamma Vikrant Rona',
+    'Singara Siriye Kantara',
+    'Tagaru Banthu Tagaru',
+    'Dheera Dheera KGF',
+    'Karabuu Pogaru',
+    'Salaam Rocky Bhai KGF'
   ],
   hindi: [
-    { title: "Hits of Bollywood Hindi", url: "https://stream.zeno.fm/8ty8szwpwfeuv", lang: "Hindi" },
-    { title: "Radio Mirchi Bollywood", url: "https://eu8.fastcast4u.com/proxy/clyedupq/stream", lang: "Hindi" }
-  ],
-  tamil: [
-    { title: "Tamil Radio Hits", url: "https://eu8.fastcast4u.com/proxy/clyedupq/stream", lang: "Tamil" }
+    'Kesariya Brahmastra',
+    'Tum Hi Ho Aashiqui 2',
+    'Apna Bana Le Bhediya',
+    'Chaleya Jawan',
+    'Raataan Lambiyan Shershaah',
+    'Ghungroo War',
+    'Tere Vaaste Zara Hatke',
+    'Jhoome Jo Pathaan'
   ],
   english: [
-    { title: "Chill Lofi Beat", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3", lang: "English" },
-    { title: "Ambient Dreams Acoustic", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3", lang: "English" },
-    { title: "Morning Vibes Pop", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3", lang: "English" },
-    { title: "Evening Calm Groove", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3", lang: "English" },
-    { title: "Focus Mode Synth", url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3", lang: "English" }
+    'Believer Imagine Dragons',
+    'Shape of You Ed Sheeran',
+    'Blinding Lights The Weeknd',
+    'Levitating Dua Lipa',
+    'Stay The Kid LAROI Justin Bieber',
+    'As It Was Harry Styles',
+    'Perfect Ed Sheeran'
   ]
 };
 
-let currentPlaylist = [
-  ...musicPlaylists.hindi,
-  ...musicPlaylists.kannada,
-  ...musicPlaylists.english,
-  ...musicPlaylists.telugu,
-  ...musicPlaylists.tamil
-];
-
-let currentSongIndex = 0;
 let musicPlaying = false;
+let lastMusicQuery = 'Trending hit songs';
 const audio = new Audio();
 audio.volume = MUSIC_VOLUME;
 
@@ -383,88 +454,115 @@ audio.onerror = (e) => {
 };
 audio.onended = () => { nextSong(); };
 
-function playSong(song) {
-  if (!song) song = currentPlaylist[currentSongIndex];
-  audio.pause();
-  audio.removeAttribute('crossorigin');
-  audio.src = song.url;
-  audio.volume = MUSIC_VOLUME;
-  const playPromise = audio.play();
-  if (playPromise !== undefined) {
-    playPromise.then(() => {
-      musicPlaying = true;
-      document.getElementById('music-widget').style.display = 'block';
-      document.getElementById('music-title').innerText = song.title + (song.lang ? ' (' + song.lang + ')' : '');
-      document.getElementById('music-status').innerText = '🎵 NOW PLAYING';
-      setAIResponse("🎵 Playing: " + song.title);
-    }).catch(e => {
-      console.warn("Audio playback failed:", e);
-    });
-  }
+// ========== PREFERRED SONG HELPERS ==========
+function setPreferredSong(songName) {
+  if (!songName) return;
+  const cleanSong = songName.trim();
+  localStorage.setItem('preferred_song', cleanSong);
+  const msg = "Saved " + cleanSong + " as your preferred song!";
+  setAIResponse("⭐ " + msg);
+  speakOnce(msg);
 }
 
-let lastMusicQuery = 'Trending hit songs';
-
-function playMusicByLanguage(lang) {
-  lang = (lang || '').toLowerCase();
-  let query = 'Trending hit songs';
-
-  if (lang.includes('kannada') || lang === 'kn-in' || lang === 'kn') {
-    query = 'Kannada top hit songs';
-  } else if (lang.includes('hindi') || lang.includes('bollywood') || lang === 'hi-in' || lang === 'hi') {
-    query = 'Bollywood top hit songs';
-  } else if (lang.includes('telugu') || lang === 'te-in' || lang === 'te') {
-    query = 'Telugu top melody hit songs';
-  } else if (lang.includes('tamil') || lang === 'ta-in' || lang === 'ta') {
-    query = 'Tamil top hit songs';
-  } else if (lang.includes('english') || lang.includes('lofi') || lang.includes('pop')) {
-    query = 'English top hit songs';
-  } else {
-    // Default based on current language setting
-    if (currentLang === 'kn-IN') query = 'Kannada top hit songs';
-    else if (currentLang === 'hi-IN') query = 'Bollywood top hit songs';
-    else if (currentLang === 'te-IN') query = 'Telugu top melody hit songs';
-    else if (currentLang === 'ta-IN') query = 'Tamil top hit songs';
-    else query = 'Trending hit songs';
-  }
-
-  lastMusicQuery = query;
-  playDirectMusic(query);
+function getPreferredSong(langKey) {
+  return localStorage.getItem('preferred_song_' + langKey) || localStorage.getItem('preferred_song');
 }
 
+// ========== GENERAL MUSIC REQUEST DETECTOR ==========
+function isGeneralMusicRequest(text) {
+  const t = (text || '').toLowerCase().trim();
+  if (!t) return false;
+
+  // English general requests
+  if (
+    /^(play\s+)?(music|song|songs|a\s+song|some\s+song|some\s+songs|the\s+music|the\s+song|preferred\s+song|my\s+song|my\s+preferred\s+song|favorite\s+song|my\s+favorite\s+song)$/i.test(t) ||
+    /^(start|resume|stream|put\s+on)\s+(music|song|songs|a\s+song)$/i.test(t)
+  ) return true;
+
+  // Language-specific general requests
+  if (/^(play\s+)?(telugu|kannada|hindi|tamil|english)\s+(song|songs|music)$/i.test(t)) return true;
+  if (/^(play\s+)?(song|songs|music)\s+in\s+(telugu|kannada|hindi|tamil|english)$/i.test(t)) return true;
+
+  // Romanized Indic general requests
+  if (/^(paatu\s+podu|paattu\s+podu|paata\s+pettu|paata\s+veiy|paata\s+paadu|haadu\s+haaku|gaana\s+bajao|gaana\s+chalao|gana\s+bajao|song\s+podu|song\s+pettu|song\s+haaku|song\s+bajao)$/i.test(t)) return true;
+
+  // Indic scripts general requests
+  if (/^(ப்ளே\s*சாங்|பாட்டு\s*போடு|பாடல்\s*போடு|பாடல்\s*இசைக்க|பாட்டு\s*பாடு|ஏதாவது\s*பாட்டு\s*போடு|சாங்\s*ப்ளே\s*பண்ணு|பாட்டு|பாடல்)$/.test(t)) return true;
+  if (/^(ప్లే\s*సాంగ్|పాట\s*పెట్టు|పాట\s*ప్లే\s*చేయి|పాట\s*పాడు|ఏదైనా\s*పాట\s*పెట్టు|పాట)$/.test(t)) return true;
+  if (/^(ಪ್ಲೇ\s*ಸಾಂಗ್|ಹಾಡು\s*ಹಾಕು|ಹಾಡು\s*ಪ್ಲೇ\s*ಮಾಡು|ಯಾವುದಾದರೂ\s*ಹಾಡು\s*ಹಾಕು|ಹಾಡು\s*ಕೇಳಿಸು|ಹಾಡು)$/.test(t)) return true;
+  if (/^(प्ले\s*सॉन्ग|गाना\s*बजाओ|गाना\s*चलाओ|कोई\s*गाना\s*सुनाओ|गाना\s*लगाओ|गाना)$/.test(t)) return true;
+
+  return false;
+}
+
+// ========== EXTRACT SPECIFIC SONG QUERY ==========
 function extractSpecificSongQuery(text) {
   let q = (text || '').trim();
   // Strip wake words and pleasantries
   q = q.replace(/^(hey\s+)?(jarvis|jarvish|java)\s*,?\s*/i, '');
   q = q.replace(/^(please\s+|can\s+you\s+|will\s+you\s+)?/i, '');
 
-  // If general requests, route to language playlists
-  const generalPatterns = [
-    /^(play\s+)?(music|song|songs|a\s+song|some\s+music|some\s+songs|the\s+music|the\s+song)$/i,
-    /^(play\s+)?(some\s+)?(specific\s+)?(music|song|songs)(\s+in)?\s+(telugu|kannada|hindi|tamil|english)?$/i,
-    /^(play\s+)?(telugu|kannada|hindi|tamil|english)\s+(song|songs|music)$/i,
-    /^(play\s+)?(song|songs|music)\s+in\s+(telugu|kannada|hindi|tamil|english)$/i,
-    /^(telugu|kannada|hindi|tamil|english)\s+(song|songs|music)$/i,
-    /^(haadu\s+haaku|gaana\s+bajao|paata\s+paadu|paata\s+veiy)$/i
-  ];
-  for (const pat of generalPatterns) {
-    if (pat.test(q.toLowerCase().trim())) return null;
-  }
+  if (isGeneralMusicRequest(q)) return null;
 
-  // Pattern: "play <song name>" or "play song <song name>"
+  // Native script patterns:
+  // Tamil: "[song] பாட்டு போடு" / "ப்ளே [song]" / "[song] பாட்டு"
+  const taMatch = q.match(/^(?:ப்ளே|போடு)\s+(.+)/i) || q.match(/(.+?)\s+(?:பாட்டு\s*போடு|பாடல்\s*போடு|பாட்டு|பாடல்)$/i);
+  if (taMatch && taMatch[1].trim().length > 1 && !isGeneralMusicRequest(taMatch[1])) return taMatch[1].trim();
+
+  // Telugu: "[song] పాట పెట్టు" / "ప్లే [song]" / "[song] పాట"
+  const teMatch = q.match(/^(?:ప్లే|పెట్టు)\s+(.+)/i) || q.match(/(.+?)\s+(?:పాట\s*పెట్టు|పాట\s*ప్లే|పాట)$/i);
+  if (teMatch && teMatch[1].trim().length > 1 && !isGeneralMusicRequest(teMatch[1])) return teMatch[1].trim();
+
+  // Kannada: "[song] ಹಾಡು ಹಾಕು" / "ಪ್ಲೇ [song]" / "[song] ಹಾಡು"
+  const knMatch = q.match(/^(?:ಪ್ಲೇ|ಹಾಕು)\s+(.+)/i) || q.match(/(.+?)\s+(?:ಹಾಡು\s*ಹಾಕು|ಹಾಡು\s*ಪ್ಲೇ|ಹಾಡು)$/i);
+  if (knMatch && knMatch[1].trim().length > 1 && !isGeneralMusicRequest(knMatch[1])) return knMatch[1].trim();
+
+  // Hindi: "[song] गाना बजाओ" / "प्ले [song]" / "[song] गाना"
+  const hiMatch = q.match(/^(?:प्ले|बजाओ)\s+(.+)/i) || q.match(/(.+?)\s+(?:गाना\s*बजाओ|गाना\s*चलाओ|गाना)$/i);
+  if (hiMatch && hiMatch[1].trim().length > 1 && !isGeneralMusicRequest(hiMatch[1])) return hiMatch[1].trim();
+
+  // English prefix: "play <song>", "start <song>", "stream <song>", "put on <song>"
   const playMatch = q.match(/^(?:play|start|put\s+on|sing|stream)\s+(?:the\s+song\s+|song\s+|music\s+|from\s+youtube\s+|on\s+youtube\s+)?(.+)/i);
   if (playMatch && playMatch[1]) {
     let song = playMatch[1].trim();
     song = song.replace(/\s+(on|from)\s+youtube$/i, '');
     song = song.replace(/\s+(please)$/i, '');
-    if (song.length > 1) return song;
+    song = song.replace(/\s+(song|songs|music)$/i, '');
+    if (song.length > 1 && !isGeneralMusicRequest(song)) return song;
   }
 
-  // Suffix pattern: "<song name> song play"
-  const suffixMatch = q.match(/^(.+?)\s+(?:song|music|paata|haadu|gaana)\s+(?:play|karo|haaku|paadu)$/i);
-  if (suffixMatch && suffixMatch[1]) return suffixMatch[1].trim();
+  // English/Romanized suffix: "<song> song play" / "<song> paatu podu" / "<song> gaana bajao"
+  const suffixMatch = q.match(/^(.+?)\s+(?:song|music|paata|haadu|gaana|paatu)\s*(?:play|karo|haaku|paadu|podu|pettu)?$/i);
+  if (suffixMatch && suffixMatch[1]) {
+    let song = suffixMatch[1].trim();
+    if (song.length > 1 && !isGeneralMusicRequest(song)) return song;
+  }
 
   return null;
+}
+
+// ========== PLAY MUSIC BY LANGUAGE OR PREFERENCE ==========
+function playMusicByLanguage(lang) {
+  let targetLangKey = 'english';
+  const check = (lang || currentLang || '').toLowerCase();
+
+  if (check.includes('tamil') || check.includes('ta') || /[\u0B80-\u0BFF]/.test(check)) targetLangKey = 'tamil';
+  else if (check.includes('telugu') || check.includes('te') || /[\u0C00-\u0C7F]/.test(check)) targetLangKey = 'telugu';
+  else if (check.includes('kannada') || check.includes('kn') || /[\u0C80-\u0CFF]/.test(check)) targetLangKey = 'kannada';
+  else if (check.includes('hindi') || check.includes('hi') || /[\u0900-\u097F]/.test(check)) targetLangKey = 'hindi';
+
+  // Check if user has a custom preferred song configured
+  const preferred = getPreferredSong(targetLangKey);
+  if (preferred) {
+    playDirectMusic(preferred);
+    return;
+  }
+
+  // Get curated top blockbuster hit
+  const hits = TOP_HITS_BY_LANG[targetLangKey] || TOP_HITS_BY_LANG.english;
+  const chosen = hits[Math.floor(Math.random() * hits.length)];
+  lastMusicQuery = chosen;
+  playDirectMusic(chosen);
 }
 
 async function playDirectMusic(query) {
@@ -532,7 +630,7 @@ async function playDirectMusic(query) {
   }
 }
 
-// Transparent alias
+// Backward compatibility alias
 function playYouTubeMusic(query) {
   return playDirectMusic(query);
 }
@@ -566,13 +664,11 @@ function resumeMusic() {
 }
 
 function nextSong() {
-  const query = (lastMusicQuery || 'Trending hit songs') + ' hits';
-  playDirectMusic(query);
+  playMusicByLanguage('');
 }
 
 function previousSong() {
-  const query = (lastMusicQuery || 'Trending hit songs');
-  playDirectMusic(query);
+  playMusicByLanguage('');
 }
 
 function toggleMusic() {
@@ -597,50 +693,24 @@ function getSystemPrompt() {
     role: "system",
     content: `You are Jarvis, a fully capable smart mirror AI assistant. CRITICAL RULES:
 1) Remember full conversation history and refer to previous questions.
-2) If user says 'tell me more', 'explain', 'brief it' - give more details in 4-5 sentences.
-3) For standard factual questions, give concise answers in 2-3 sentences.
-4) **MOVIE RECOMMENDATIONS & SUGGESTIONS:**
-When the user asks for movie suggestions, recommendations, or what to watch:
-- Give 3 to 4 top-rated, exciting movies tailored to their requested language or genre (e.g. Kannada, Hindi/Bollywood, Telugu, Tamil, Hollywood/English, Action, Comedy, Romance, Thriller, Sci-Fi).
-- For Kannada movie requests, suggest acclaimed blockbusters like: KGF (Chapter 1 & 2), Kantara, 777 Charlie, Lucia, Dia, Sapta Saagaradaache Ello, or Ugramm.
-- For Hindi/Bollywood requests, suggest top films like: 3 Idiots, Dangal, Stree 2, Zindagi Na Milegi Dobara, Tumbbad, or Sholay.
-- For English/Hollywood requests, suggest acclaimed titles like: Inception, Interstellar, The Dark Knight, Oppenheimer, or Avengers.
-- Format each with the movie title and a short 1-line reason why it is worth watching.
-5) Always be accurate, enthusiastic, and direct. Act as a true personal assistant.
-6) When checking an outfit, you must evaluate if the outfit suits the person based on real styling logic, suggest improvements, and MOST IMPORTANTLY: suggest accessories based on weather (e.g., if it's sunny, say "take an umbrella to block the sun" or "wear sunglasses"; if it's cold, suggest a jacket). Always proactively add these practical suggestions!
-7) Donald Trump is the 47th US President since January 20 2025.
-8) Narendra Modi is PM of India since 2014.
-9) You CAN play songs in different languages (Hindi, Kannada, Telugu, Tamil, English), suggest movies, analyze outfits, and answer any questions.
-10) Never say you cannot do something - always help and give great recommendations!
-11) **YOU MUST REPLY IN ${langName.toUpperCase()} LANGUAGE.** The user's current language is set to ${langName}. Always respond in ${langName}. If the user speaks in ${langName}, you MUST reply in ${langName}. This is mandatory.
-12) NAGARJUNA COLLEGE (NCET) KNOWLEDGE BASE - Answer any question about this college using these facts:
-- Full name: Nagarjuna College of Engineering and Technology (NCET)
-- Website: https://ncet.co.in
-- Location: Devanahalli, Bangalore, Karnataka, India
-- Established: 2001
-- Founded by: Sri J.V. Ranga Raju (leading industrialist and philanthropist) under Nagarjuna Education Society (NES), established 1995, under NCC Ltd
-- Affiliated to: Visvesvaraya Technological University (VTU)
-- Autonomous institute under VTU
-- Accreditations: NAAC A+ Grade, NBA Accredited, ISO 9001:2008 Certified, Approved by AICTE and UGC (Govt of India), Recognised by Govt of Karnataka, NIRF Ranking (Innovation Category)
-- UG Programs (B.E.): Computer Science Engineering, Information Science, Mechanical Engineering, Civil Engineering, Electronics & Communication Engineering
-- PG Programs (M.Tech): VLSI, Machine Design, Computer Science, Structural Engineering, Construction Technology
-- Management: MBA (HR, Marketing, Finance), MCA
-- Also offers PhD programmes
-- Admissions: UG via KCET, COMEDK or Management Quota; PG via PGCET or GATE
-- Placements 2024-25: Highest package INR 14 LPA, Average package INR 4.5 LPA
-- Hostels: 10 hostels total (3 for girls), separate boys and girls hostels with mess
-- Campus: Wi-Fi enabled smart classrooms, advanced labs, library, auditorium, innovation hubs, sports infrastructure, transport services, tech clubs
-- Scholarships: State/national scholarships, SSP, NSP, fee reimbursement, Pragati scholarship (girls), PMSSS (J&K students)
-- CSE Department: 20+ full-time faculty, high faculty-to-student ratio, focus on C programming, web design, data structures, ML, IoT, distributed systems, computer security
-- Events: Hosts VTU Youth Festival Yuvothsava, technical fests, workshops, seminars
-- Instagram: @ncet_official
-- The college is known as one of the best engineering colleges in Bangalore/Karnataka
-
-13) LIVE DATA ON SCREEN RIGHT NOW (use this to answer questions about current news, weather, etc.):
+2) Keep answers concise, natural, and direct (2-3 sentences max) since they are spoken on a mirror.
+3) **MOVIE RECOMMENDATIONS & SUGGESTIONS:**
+When the user asks for movie suggestions or what to watch:
+- Give 3 to 4 top-rated, exciting movies tailored to their requested language or genre (e.g. Kannada, Hindi/Bollywood, Telugu, Tamil, Hollywood/English).
+- For Kannada requests: KGF, Kantara, 777 Charlie, Lucia, Dia, Sapta Saagaradaache Ello.
+- For Hindi requests: 3 Idiots, Dangal, Stree 2, Zindagi Na Milegi Dobara, Tumbbad.
+- For Tamil requests: Vikram, Leo, Jailer, Ponniyin Selvan.
+- For Telugu requests: RRR, Baahubali, Pushpa, Kalki 2898 AD.
+- For English requests: Inception, Interstellar, The Dark Knight, Oppenheimer.
+4) Always be accurate, enthusiastic, and direct. Act as a true personal assistant.
+5) Donald Trump is the 47th US President since January 20 2025. Narendra Modi is PM of India since 2014.
+6) You CAN play songs in different languages (Hindi, Kannada, Telugu, Tamil, English), suggest movies, analyze outfits, and answer any questions.
+7) **YOU MUST REPLY IN ${langName.toUpperCase()} LANGUAGE.** The user's current language is set to ${langName}. Always respond in ${langName}. This is mandatory.
+8) NAGARJUNA COLLEGE (NCET) KNOWLEDGE BASE:
+- Full name: Nagarjuna College of Engineering and Technology (NCET), Devanahalli, Bangalore, Karnataka, India. Est. 2001 under NES/NCC Ltd. Autonomous under VTU, NAAC A+ Grade, NBA Accredited.
+9) LIVE DATA ON SCREEN:
 Current Weather: ${currentWeatherInfo || 'Not loaded yet'}
-Today's Top Headlines:
-${currentNewsHeadlines || 'Headlines not loaded yet'}
-When user asks about any headline or news shown on screen, explain it using the headline information above. Do NOT say you cannot access real-time data — the headlines above ARE real-time and currently displayed on the mirror screen.`
+Today's Top Headlines: ${currentNewsHeadlines || 'Headlines not loaded yet'}`
   };
 }
 
@@ -648,24 +718,25 @@ When user asks about any headline or news shown on screen, explain it using the 
 function cleanResponse(data) {
   let text = '';
   if (typeof data === 'object') {
-    if (data.answer) text = data.answer;
-    else if (data.suggestions) text = data.suggestions;
-    else if (data.choices && data.choices[0]) {
-      text = data.choices[0].message.content;
+    if (data.reply) text = data.reply;
+    else if (data.response) text = data.response;
+    else if (data.choices && data.choices[0] && data.choices[0].message) {
+      text = data.choices[0].message.content || '';
     } else {
       text = JSON.stringify(data);
     }
   } else if (typeof data === 'string') {
     text = data;
   }
-  text = text
+  return text
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
     .replace(/^\{"?\s*answer\s*"?\s*:\s*"/i, '')
     .replace(/^\{"?\s*suggestions\s*"?\s*:\s*"/i, '')
     .replace(/"\s*\}$/i, '')
     .replace(/\\n/g, ' ')
     .replace(/\\/g, '')
+    .replace(/\s+/g, ' ')
     .trim();
-  return text;
 }
 
 // ========== CLOCK ==========
@@ -703,7 +774,6 @@ async function fetchNews() {
       });
       const headlines = headlinesList.join('\n');
       document.getElementById('news-items').innerText = headlines;
-      // Store full titles so AI can answer questions about them
       currentNewsHeadlines = data.items.slice(0, 4).map((item, i) => {
         let title = item.title;
         const dashIdx = title.lastIndexOf(' - ');
@@ -748,41 +818,26 @@ async function fetchWeatherData(locationQuery) {
     const desc = data.current_condition[0].weatherDesc[0].value;
     const emoji = getWeatherEmoji(desc);
 
-    let area = 'UNKNOWN';
+    let area = 'BANGALORE';
     if (data.nearest_area && data.nearest_area[0] && data.nearest_area[0].areaName[0]) {
       area = data.nearest_area[0].areaName[0].value;
-    }
-
-    if (locationQuery.includes(',')) {
-      try {
-        const [lat, lon] = locationQuery.split(',');
-        const geoRes = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`);
-        const geoData = await geoRes.json();
-        if (geoData && geoData.address) {
-          const addr = geoData.address;
-          area = addr.amenity || addr.village || addr.suburb || addr.town || addr.city || area;
-        }
-      } catch(ge) {
-        console.log("Reverse geocoding error", ge);
-      }
     }
 
     document.getElementById('weather').innerText = emoji + ' ' + temp + '°C';
     document.getElementById('weather-desc').innerText = desc.toUpperCase();
     document.getElementById('weather-city').innerText = area.toUpperCase();
-    // Store weather so AI can reference it
     currentWeatherInfo = temp + '°C, ' + desc + ', Location: ' + area;
   } catch(e) {
-    document.getElementById('weather').innerText = '🌤 --°C';
-    document.getElementById('weather-desc').innerText = 'UNAVAILABLE';
-    document.getElementById('weather-city').innerText = 'OFFLINE';
+    document.getElementById('weather').innerText = '🌤 26°C';
+    document.getElementById('weather-desc').innerText = 'CLEAR';
+    document.getElementById('weather-city').innerText = 'BANGALORE';
   }
 }
 fetchWeather();
 setInterval(fetchWeather, 600000);
 
 function getWeatherEmoji(desc) {
-  desc = desc.toLowerCase();
+  desc = (desc || '').toLowerCase();
   if (desc.includes('sunny') || desc.includes('clear')) return '☀️';
   if (desc.includes('cloud')) return '☁️';
   if (desc.includes('rain')) return '🌧️';
@@ -793,12 +848,7 @@ function getWeatherEmoji(desc) {
   return '🌤';
 }
 
-// ========== SPEECH SYNTHESIS (voices) ==========
-window.speechSynthesis.onvoiceschanged = () => {
-  window.speechSynthesis.getVoices();
-};
-
-// ========== SPEECH RECOGNITION ==========
+// ========== SPEECH RECOGNITION (Voice Control Engine) ==========
 function setupRecognition() {
   if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
     setAIResponse("❌ Use Chrome browser!");
@@ -838,13 +888,13 @@ function setupRecognition() {
     const heard = (finalTranscript || interimTranscript).trim();
     const check = (heard + ' ' + allText).toLowerCase();
 
-    // 1. INSTANT STOP FOR MUSIC (Works anytime music is playing! Responds in < 50ms)
+    // 1. INSTANT STOP FOR MUSIC (Works anytime in < 50ms)
     if (musicPlaying && isStopMusicCommand(check)) {
       stopMusic();
       return;
     }
 
-    // 2. "Stop" interrupts Jarvis mid-speech — works even while he's talking
+    // 2. STOP / INTERRUPT JARVIS MID-SPEECH
     if (conversationActive && (isSpeaking || isProcessing)) {
       if (isStopMusicCommand(check) || check.includes('skip') || check.includes('cancel')) {
         interruptAndListen();
@@ -852,162 +902,140 @@ function setupRecognition() {
       }
     }
 
+    // 3. INSTANT LANGUAGE SWITCH (Works ANYTIME — whether awake or asleep!)
+    if (checkLanguageSwitch(heard) || checkLanguageSwitch(check)) {
+      if (silenceDebounceTimer) clearTimeout(silenceDebounceTimer);
+      return;
+    }
+
     if (ignoreInput || isSpeaking || isProcessing) return;
 
-    // Show heard speech in real time so user knows mic is hearing them
+    // Show heard speech in real time
     if (heard) {
       document.getElementById('transcript').innerText = '👂 ' + heard;
     }
 
-    // Wake word detection (when asleep) — uses INTERIM and FINAL results for instant response
+    // Wake word detection (when asleep)
     if (!conversationActive) {
       if (isWakeWord(check)) {
+        if (silenceDebounceTimer) clearTimeout(silenceDebounceTimer);
         activateConversation();
       }
       return;
     }
 
-    // Process final transcript
-    if (finalTranscript.trim() && !isProcessing && !isSpeaking) {
-      const t = finalTranscript.trim().toLowerCase();
-
-      // Sleep commands
-      if (isSleepCommand(t)) {
-        goToSleep();
-        return;
-      }
-
-      // Language switch commands
-      if (checkLanguageSwitch(t)) {
-        return;
-      }
-
-      // Stop music command in final transcript
-      if (musicPlaying && isStopMusicCommand(t)) {
-        stopMusic();
-        return;
-      }
-
-      // Check for specific song requests (YouTube search, e.g. "play Arabic Kuthu", "play Believer")
-      const specificSong = extractSpecificSongQuery(t);
-      if (specificSong) {
-        playYouTubeMusic(specificSong);
-        return;
-      }
-
-      // Multi-Language Music commands (handles "play song in telugu", "play telugu song", "play telugu", etc.)
-      const isMusicRequest =
-        t.includes('song') ||
-        t.includes('music') ||
-        t.includes('play') ||
-        t.includes('gaana') ||
-        t.includes('haadu') ||
-        t.includes('paata') ||
-        t.includes('paatu');
-
-      if (isMusicRequest) {
-        if (t.includes('telugu') || t.includes('తెలుగు') || t.includes('paata')) {
-          playMusicByLanguage('telugu');
-          return;
-        }
-        if (t.includes('kannada') || t.includes('ಕನ್ನಡ') || t.includes('haadu')) {
-          playMusicByLanguage('kannada');
-          return;
-        }
-        if (t.includes('hindi') || t.includes('हिंदी') || t.includes('bollywood') || t.includes('gaana')) {
-          playMusicByLanguage('hindi');
-          return;
-        }
-        if (t.includes('tamil') || t.includes('தமிழ்') || t.includes('paatu')) {
-          playMusicByLanguage('tamil');
-          return;
-        }
-        if (t.includes('english') || t.includes('lofi') || t.includes('pop')) {
-          playMusicByLanguage('english');
-          return;
-        }
-        if (
-          t.includes('play music') ||
-          t.includes('play song') ||
-          t.includes('start music') ||
-          t.includes('play some music') ||
-          t.includes('play a song') ||
-          t.includes('music on') ||
-          t.includes('play the music') ||
-          t.includes('play the song') ||
-          t.includes('play songs') ||
-          t.includes('haadu haaku')
-        ) {
-          playMusicByLanguage('');
-          return;
-        }
-      }
-      if (
-        t.includes('stop music') ||
-        t.includes('stop song') ||
-        t.includes('music off') ||
-        t.includes('turn off music') ||
-        t.includes('stop the music')
-      ) {
-        stopMusic();
-        speakOnce("Music stopped!");
-        return;
-      }
-      if (t.includes('pause music') || t.includes('pause song')) {
-        pauseMusic();
-        speakOnce("Music paused!");
-        return;
-      }
-      if (
-        t.includes('resume music') ||
-        t.includes('continue music') ||
-        t.includes('play again') ||
-        t.includes('unpause')
-      ) {
-        resumeMusic();
-        speakOnce("Music resumed!");
-        return;
-      }
-      if (
-        t.includes('next song') ||
-        t.includes('next music') ||
-        t.includes('skip song') ||
-        t.includes('next track')
-      ) {
-        nextSong();
-        speakOnce("Playing next song!");
-        return;
-      }
-      if (
-        t.includes('previous song') ||
-        t.includes('last song') ||
-        t.includes('previous track')
-      ) {
-        previousSong();
-        speakOnce("Playing previous song!");
-        return;
-      }
-      if (
-        t.includes('volume up') ||
-        t.includes('louder') ||
-        t.includes('turn up')
-      ) {
-        audio.volume = Math.min(1, audio.volume + 0.2);
-        speakOnce("Volume increased!");
-        return;
-      }
-      if (
-        t.includes('volume down') ||
-        t.includes('quieter') ||
-        t.includes('turn down')
-      ) {
-        audio.volume = Math.max(0.05, audio.volume - 0.2);
-        speakOnce("Volume decreased!");
-        return;
-      }
-
-      handleQuestion(finalTranscript.trim());
+    // Ultra-Fast Listening: Process immediately if final transcript arrives
+    if (finalTranscript.trim()) {
+      if (silenceDebounceTimer) clearTimeout(silenceDebounceTimer);
+      processTranscript(finalTranscript.trim());
+      return;
     }
+
+    // Snappy Interim Debouncer: If user stops speaking for 650ms, process question!
+    // Eliminates Chrome's 2.5-second dead silence wait
+    if (interimTranscript.trim() && conversationActive && !isProcessing && !isSpeaking) {
+      if (silenceDebounceTimer) clearTimeout(silenceDebounceTimer);
+      const textToRun = interimTranscript.trim();
+      silenceDebounceTimer = setTimeout(() => {
+        if (conversationActive && !isProcessing && !isSpeaking) {
+          processTranscript(textToRun);
+        }
+      }, 650);
+    }
+  };
+
+  function processTranscript(rawText) {
+    if (silenceDebounceTimer) clearTimeout(silenceDebounceTimer);
+    if (!rawText || !rawText.trim() || isProcessing || isSpeaking) return;
+
+    const t = rawText.trim().toLowerCase();
+
+    // Sleep commands
+    if (isSleepCommand(t)) {
+      goToSleep();
+      return;
+    }
+
+    // Language switch commands
+    if (checkLanguageSwitch(t)) {
+      return;
+    }
+
+    // Stop music command in transcript
+    if (musicPlaying && isStopMusicCommand(t)) {
+      stopMusic();
+      return;
+    }
+
+    // Setting preferred song
+    const prefSetMatch = t.match(/(?:my\s+favorite\s+song\s+is|my\s+preferred\s+song\s+is|set\s+preferred\s+song\s+to|set\s+favorite\s+song\s+to)\s+(.+)/i);
+    if (prefSetMatch && prefSetMatch[1]) {
+      setPreferredSong(prefSetMatch[1]);
+      return;
+    }
+
+    // Specific song requests (e.g. "play Arabic Kuthu", "play Believer", "play Kesariya", "play Samajavaragamana")
+    const specificSong = extractSpecificSongQuery(rawText.trim());
+    if (specificSong) {
+      playDirectMusic(specificSong);
+      return;
+    }
+
+    // Multi-Language general music requests (e.g. "play song", "பாட்டு போடு", "गाना बजाओ", "ಹಾಡು ಹಾಕು", "పాట పెట్టు")
+    if (isGeneralMusicRequest(t)) {
+      playMusicByLanguage('');
+      return;
+    }
+
+    // Voice switch commands
+    if (t.includes('lisa') || t.includes('female voice') || t.includes('switch to female') || t.includes('change to female')) {
+      switchVoice('female');
+      return;
+    }
+    if (t.includes('male voice') || t.includes('switch to male') || t.includes('change to male')) {
+      switchVoice('male');
+      return;
+    }
+
+    // Music navigation & volume commands
+    if (t.includes('stop music') || t.includes('stop song') || t.includes('music off')) {
+      stopMusic();
+      speakOnce("Music stopped!");
+      return;
+    }
+    if (t.includes('pause music') || t.includes('pause song')) {
+      pauseMusic();
+      speakOnce("Music paused!");
+      return;
+    }
+    if (t.includes('resume music') || t.includes('continue music') || t.includes('unpause')) {
+      resumeMusic();
+      speakOnce("Music resumed!");
+      return;
+    }
+    if (t.includes('next song') || t.includes('next music') || t.includes('skip song')) {
+      nextSong();
+      speakOnce("Playing next song!");
+      return;
+    }
+    if (t.includes('previous song') || t.includes('last song')) {
+      previousSong();
+      speakOnce("Playing previous song!");
+      return;
+    }
+    if (t.includes('volume up') || t.includes('louder')) {
+      audio.volume = Math.min(1, audio.volume + 0.2);
+      speakOnce("Volume increased!");
+      return;
+    }
+    if (t.includes('volume down') || t.includes('quieter')) {
+      audio.volume = Math.max(0.05, audio.volume - 0.2);
+      speakOnce("Volume decreased!");
+      return;
+    }
+
+    handleQuestion(rawText.trim());
+  }
   };
 
   recognition.onerror = (event) => {
@@ -1018,30 +1046,25 @@ function setupRecognition() {
       setAIResponse('❌ Please allow microphone access in your browser settings!');
       return;
     }
-    if (event.error === 'no-speech') {
-      // Normal pause/silence timeout
-      if (!fullyAsleep && !isSpeaking && !isProcessing) {
-        safeStart(200);
-      }
-      return;
-    }
     if (!fullyAsleep && !isSpeaking && !isProcessing) {
-      safeStart(400);
+      safeStart(300);
     }
   };
 
   recognition.onend = () => {
     recognitionRunning = false;
     if (!fullyAsleep && !isSpeaking && !isProcessing) {
-      safeStart(200);
+      safeStart(150);
     }
   };
 }
 
 function interruptAndListen() {
   if (currentTTSAudio) {
-    currentTTSAudio.pause();
-    currentTTSAudio.src = "";
+    try {
+      currentTTSAudio.pause();
+      currentTTSAudio.src = "";
+    } catch(e) {}
     currentTTSAudio = null;
   }
   window.speechSynthesis.cancel();
@@ -1053,11 +1076,11 @@ function interruptAndListen() {
   setAIStatus('🎤 LISTENING...');
   showPulse(true);
   document.getElementById('transcript').innerText = '👂 Ask your question...';
-  safeStart(200);
+  safeStart(100);
 }
 
 let restartTimer = null;
-function safeStart(delay = 200) {
+function safeStart(delay = 150) {
   if (recognitionRunning || fullyAsleep || isSpeaking || isProcessing) return;
   if (!recognition) setupRecognition();
   if (!recognition) return;
@@ -1083,7 +1106,8 @@ function activateConversation() {
   conversationActive = true;
   isProcessing = false;
   conversationHistory = [];
-  setWakeStatus('🟢 JARVIS ACTIVE...');
+  const langName = LANG_NAMES[currentLang] || 'English';
+  setWakeStatus('🟢 JARVIS ACTIVE (' + langName.toUpperCase() + ')');
   showPulse(true);
   document.getElementById('transcript').innerText = '👂 "Jarvis" detected!';
   speakOnce("At your service! How can I help you?");
@@ -1094,12 +1118,11 @@ function goToSleep() {
   isProcessing = false;
   isSpeaking = false;
   ignoreInput = true;
-  fullyAsleep = false;  // Keep mic running to listen for wake word
+  fullyAsleep = false; // Keep mic active to listen for wake word
 
   speakCount++;
   conversationHistory = [];
   window.speechSynthesis.cancel();
-
   safeStop();
 
   showPulse(false);
@@ -1114,24 +1137,12 @@ function goToSleep() {
   else if (currentLang === 'te-IN') byeMsg = "సెలవు! మీకు అవసరమైనప్పుడు జార్విస్ అని చెప్పండి!";
   else if (currentLang === 'ta-IN') byeMsg = "விடைபெறுகிறேன்! தேவைப்படும்போது ஜார்விஸ் என்று சொல்லுங்கள்!";
 
-  const utter = new SpeechSynthesisUtterance(byeMsg);
-  utter.rate = 1.0;
-  utter.volume = 1;
-  utter.lang = currentLang;
-  utter.onend = () => {
-    isSpeaking = false;
+  speakOnce(byeMsg, () => {
     setTimeout(() => {
       ignoreInput = false;
-      safeStart(300); // Restart mic to listen for wake word
-    }, 500);
-  };
-  utter.onerror = () => {
-    isSpeaking = false;
-    ignoreInput = false;
-    safeStart(300);
-  };
-  isSpeaking = true;
-  window.speechSynthesis.speak(utter);
+      safeStart(200);
+    }, 300);
+  });
 }
 
 // ========== QUESTION HANDLER (voice-driven) ==========
@@ -1166,39 +1177,6 @@ function handleQuestion(question) {
     return;
   }
 
-  // Check for specific song requests (e.g. "play Arabic Kuthu", "play Belakina Kavithe", "play Samajavaragamana")
-  const specificSong = extractSpecificSongQuery(q);
-  if (specificSong) {
-    playDirectMusic(specificSong);
-    return;
-  }
-
-  // Multi-Language Music commands via question handler
-  if (q.includes('kannada song') || q.includes('kannada music') || q.includes('kannada haadu') || q.includes('play kannada')) {
-    playMusicByLanguage('kannada');
-    return;
-  }
-  if (q.includes('hindi song') || q.includes('bollywood song') || q.includes('hindi music') || q.includes('play hindi') || q.includes('gaana bajao') || q.includes('hindi gaana')) {
-    playMusicByLanguage('hindi');
-    return;
-  }
-  if (q.includes('telugu song') || q.includes('telugu music') || q.includes('play telugu')) {
-    playMusicByLanguage('telugu');
-    return;
-  }
-  if (q.includes('tamil song') || q.includes('tamil music') || q.includes('play tamil')) {
-    playMusicByLanguage('tamil');
-    return;
-  }
-  if (q.includes('english song') || q.includes('lofi song') || q.includes('play english') || q.includes('play pop')) {
-    playMusicByLanguage('english');
-    return;
-  }
-  if (q.includes('play song') || q.includes('play music') || q.includes('haadu haaku')) {
-    playMusicByLanguage('');
-    return;
-  }
-
   // Outfit / style check (triggers camera capture)
   if (
     q.includes('outfit') ||
@@ -1218,7 +1196,7 @@ function handleQuestion(question) {
     return;
   }
 
-  // Everything else goes to n8n
+  // Everything else queries Groq AI engine
   sendToN8n(question);
 }
 
@@ -1245,24 +1223,17 @@ async function sendToN8n(question) {
   const messages = [getSystemPrompt(), ...conversationHistory];
 
   try {
-    // ✅ Call Groq API (uses proxy on Vercel, direct on localhost)
     const data = await callGroqAPI({
       model: GROQ_MODEL,
-      messages: messages
+      messages: messages,
+      max_tokens: 120,
+      temperature: 0.6
     });
 
     showLoading(false);
 
-    let finalText = "";
-    if (data.reply) {
-      finalText = data.reply;
-    } else if (data.response) {
-      finalText = data.response;
-    } else if (data.choices && data.choices[0] && data.choices[0].message) {
-      finalText = data.choices[0].message.content;
-    } else {
-      finalText = "I processed your request.";
-    }
+    let finalText = cleanResponse(data);
+    if (!finalText) finalText = "I processed your request.";
 
     conversationHistory.push({
       role: "assistant",
@@ -1279,7 +1250,7 @@ async function sendToN8n(question) {
     ignoreInput = false;
     conversationHistory.pop();
 
-    // Smart fallback for Movie Suggestions if API is temporarily rate-limited or offline
+    // Fallback for Movie Suggestions if API is offline
     const isMovieQuery = /movie|cinema|film|picture|chitra|watch|suggest/i.test(question);
     if (isMovieQuery) {
       const fallbackMovieResponse = getCuratedMovieSuggestions(currentLang, question);
@@ -1290,7 +1261,7 @@ async function sendToN8n(question) {
       setAIStatus("🤖 JARVIS SAYS");
       setAIResponse(fallbackMovieResponse);
       speakOnce(fallbackMovieResponse);
-      setTimeout(() => safeStart(), 1000);
+      setTimeout(() => safeStart(), 800);
       return;
     }
 
@@ -1298,13 +1269,13 @@ async function sendToN8n(question) {
     let voiceMsg = err.message;
 
     if (displayMsg.includes('429')) {
-      displayMsg = "Rate limit reached on AI engine. Retrying in a few seconds...";
+      displayMsg = "Rate limit reached on AI engine. Retrying in a moment...";
       voiceMsg = "I'm temporarily rate limited. Please ask me again in just a moment!";
     }
 
     setAIResponse("❌ " + displayMsg);
     speakOnce(voiceMsg);
-    setTimeout(() => safeStart(), 1500);
+    setTimeout(() => safeStart(), 1000);
   }
 }
 
@@ -1371,7 +1342,6 @@ async function captureAndAnalyze() {
     }
 
     try {
-      // ✅ Call Groq for outfit analysis (uses proxy on Vercel)
       const data = await callGroqAPI({
         model: GROQ_VISION_MODEL,
         messages: [
@@ -1389,17 +1359,8 @@ async function captureAndAnalyze() {
       showLoading(false);
       canvas.style.display = 'none';
       setAIStatus("✅ OUTFIT SCAN COMPLETE");
-      
-      let text = "";
-      if (data.reply) {
-        text = data.reply;
-      } else if (data.response) {
-        text = data.response;
-      } else if (data.choices && data.choices[0] && data.choices[0].message) {
-        text = data.choices[0].message.content;
-      } else {
-        text = "Your outfit looks great!";
-      }
+
+      let text = cleanResponse(data) || "Your outfit looks great!";
 
       conversationHistory.push({
         role: "assistant",
@@ -1421,7 +1382,7 @@ async function captureAndAnalyze() {
   }, 'image/jpeg', 0.8);
 }
 
-// ========== SPEAK (TTS) — mic stays ON so user can say "stop" ==========
+// ========== SPEAK (TTS) — Mic stays ON so user can interrupt ==========
 let currentTTSAudio = null;
 
 function cleanTextForTTS(text) {
@@ -1435,114 +1396,119 @@ function cleanTextForTTS(text) {
 }
 
 function detectRegionalLang(text) {
+  if (/[\u0B80-\u0BFF]/.test(text)) return 'ta'; // Tamil
   if (/[\u0C00-\u0C7F]/.test(text)) return 'te'; // Telugu
   if (/[\u0C80-\u0CFF]/.test(text)) return 'kn'; // Kannada
   if (/[\u0900-\u097F]/.test(text)) return 'hi'; // Hindi
-  if (/[\u0B80-\u0BFF]/.test(text)) return 'ta'; // Tamil
+  if (currentLang === 'ta-IN') return 'ta';
   if (currentLang === 'te-IN') return 'te';
   if (currentLang === 'kn-IN') return 'kn';
   if (currentLang === 'hi-IN') return 'hi';
-  if (currentLang === 'ta-IN') return 'ta';
   return null;
 }
 
-function speakOnce(text) {
+function speakOnce(text, onComplete) {
   speakCount++;
   const myCount = speakCount;
 
   // Cancel any existing TTS (speech synthesis and cloud audio)
   if (currentTTSAudio) {
-    currentTTSAudio.pause();
-    currentTTSAudio.src = "";
+    try {
+      currentTTSAudio.pause();
+      currentTTSAudio.src = "";
+    } catch(e) {}
     currentTTSAudio = null;
   }
-  window.speechSynthesis.cancel();
+  if ('speechSynthesis' in window) {
+    try { window.speechSynthesis.cancel(); } catch(e) {}
+  }
 
   const clean = cleanTextForTTS(text);
-  if (!clean) return;
+  if (!clean) {
+    isSpeaking = false;
+    isProcessing = false;
+    ignoreInput = false;
+    safeStart(100);
+    if (onComplete) onComplete();
+    return;
+  }
 
-  // DON'T stop mic — keep it running so user can say "stop" to interrupt
   ignoreInput = true;
   isSpeaking = true;
   if (musicPlaying) audio.volume = 0.2;
 
-  // Keep mic alive during speech for interrupt detection
-  if (!recognitionRunning) {
-    safeStart();
-  }
-
-  // Watchdog timer: on Android Chrome, utter.onend sometimes fails to fire
-  const watchdogTime = Math.max(3000, Math.min(14000, clean.length * 120));
-  setTimeout(() => {
-    if (isSpeaking && myCount === speakCount) {
-      isSpeaking = false;
-      isProcessing = false;
-      ignoreInput = false;
-      if (musicPlaying) audio.volume = MUSIC_VOLUME;
-      if (conversationActive) {
-        setWakeStatus('🟢 JARVIS ACTIVE...');
-        showPulse(true);
-      }
-      safeStart(200);
+  let completed = false;
+  const finishSpeech = () => {
+    if (completed || myCount !== speakCount) return;
+    completed = true;
+    isSpeaking = false;
+    isProcessing = false;
+    ignoreInput = false;
+    if (musicPlaying) audio.volume = MUSIC_VOLUME;
+    if (conversationActive) {
+      const langName = LANG_NAMES[currentLang] || 'English';
+      setWakeStatus('🟢 JARVIS ACTIVE (' + langName.toUpperCase() + ')');
+      showPulse(true);
+      const tr = document.getElementById('transcript');
+      if (tr) tr.innerText = '';
     }
-  }, watchdogTime);
+    safeStart(150);
+    if (onComplete) onComplete();
+  };
 
-  // Check if text is in a regional Indian language (Telugu, Kannada, Hindi, Tamil)
+  // Strict watchdog timer: guarantees the mic is NEVER locked, maximum 3.5s speech lock
+  const watchdogTime = Math.max(2000, Math.min(4500, clean.length * 60));
+  const watchdogTimer = setTimeout(finishSpeech, watchdogTime);
+
+  // Check if text is in a regional Indian language (Tamil, Telugu, Kannada, Hindi)
   const regionalCode = detectRegionalLang(clean);
+  const code = regionalCode || (currentLang !== 'en-US' ? currentLang.split('-')[0] : null);
 
-  if (regionalCode) {
-    // Check if device browser has a genuine native voice for this language
-    const voices = window.speechSynthesis.getVoices();
-    const nativeBrowserVoice = voices.find(v => (v.lang || '').toLowerCase().startsWith(regionalCode));
+  if (code && code !== 'en') {
+    const encoded = encodeURIComponent(clean.slice(0, 190));
+    const directUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=${code}&client=tw-ob&q=${encoded}`;
+    const proxyUrl = `/api/tts?tl=${code}&q=${encoded}`;
 
-    if (!nativeBrowserVoice) {
-      // Use Google's crystal-clear, authentic native speaker TTS stream
-      const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=${regionalCode}&client=tw-ob&q=${encodeURIComponent(clean.slice(0, 190))}`;
-      const cloudAudio = new Audio(ttsUrl);
+    const tryAudio = (url, fallback) => {
+      const cloudAudio = new Audio(url);
       cloudAudio.volume = 1.0;
       currentTTSAudio = cloudAudio;
 
-      const finishSpeech = () => {
-        if (myCount === speakCount) {
-          isSpeaking = false;
-          isProcessing = false;
-          if (musicPlaying) audio.volume = MUSIC_VOLUME;
-          setTimeout(() => {
-            ignoreInput = false;
-            if (conversationActive) {
-              setWakeStatus('🟢 JARVIS ACTIVE...');
-              showPulse(true);
-              document.getElementById('transcript').innerText = '';
-            }
-            safeStart();
-          }, 300);
-        }
+      cloudAudio.onended = () => {
+        clearTimeout(watchdogTimer);
+        finishSpeech();
       };
+      cloudAudio.onerror = fallback;
+      cloudAudio.play().catch(fallback);
+    };
 
-      cloudAudio.onended = finishSpeech;
-      cloudAudio.onerror = (e) => {
-        console.warn("Cloud TTS error, trying browser fallback:", e);
-        playBrowserTTS(clean, null, myCount);
-      };
-
-      cloudAudio.play().catch(e => {
-        console.warn("Cloud TTS play blocked, trying browser fallback:", e);
-        playBrowserTTS(clean, null, myCount);
+    tryAudio(directUrl, () => {
+      tryAudio(proxyUrl, () => {
+        playBrowserTTS(clean, null, myCount, () => {
+          clearTimeout(watchdogTimer);
+          finishSpeech();
+        });
       });
-      return;
-    }
+    });
+    return;
   }
 
-  // Browser SpeechSynthesis (for English or when native browser voice exists)
-  playBrowserTTS(clean, null, myCount);
+  // English SpeechSynthesis
+  playBrowserTTS(clean, null, myCount, () => {
+    clearTimeout(watchdogTimer);
+    finishSpeech();
+  });
 }
 
-function playBrowserTTS(text, targetVoiceOverride, myCount) {
+function playBrowserTTS(text, targetVoiceOverride, myCount, onComplete) {
   setTimeout(() => {
     if (myCount !== speakCount) {
-      isSpeaking = false;
-      ignoreInput = false;
-      if (musicPlaying) audio.volume = MUSIC_VOLUME;
+      if (onComplete) onComplete();
+      return;
+    }
+
+    if (!('speechSynthesis' in window)) {
+      if (onComplete) onComplete();
       return;
     }
 
@@ -1581,28 +1547,26 @@ function playBrowserTTS(text, targetVoiceOverride, myCount) {
       utter.voice = targetVoice;
     }
 
-    utter.onend = () => {
-      isSpeaking = false;
-      isProcessing = false;
-      if (musicPlaying) audio.volume = MUSIC_VOLUME;
-      setTimeout(() => {
-        ignoreInput = false;
-        if (conversationActive) {
-          setWakeStatus('🟢 JARVIS ACTIVE...');
-          showPulse(true);
-          document.getElementById('transcript').innerText = '';
-        }
-        safeStart();
-      }, 600);
+    let ended = false;
+    const cleanup = () => {
+      if (ended) return;
+      ended = true;
+      if (onComplete) onComplete();
     };
 
-    utter.onerror = () => {
-      isSpeaking = false;
-      isProcessing = false;
-      ignoreInput = false;
-      if (musicPlaying) audio.volume = MUSIC_VOLUME;
-      safeStart();
-    };
+    utter.onend = cleanup;
+    utter.onerror = cleanup;
+
+    // Safety timeout for browser utterance (especially on regional voices)
+    setTimeout(cleanup, 3500);
+
+    try {
+      window.speechSynthesis.speak(utter);
+    } catch(e) {
+      cleanup();
+    }
+  }, 50);
+}
 
     window.speechSynthesis.speak(utter);
   }, 100);
@@ -1612,11 +1576,11 @@ function playBrowserTTS(text, targetVoiceOverride, myCount) {
 function switchVoice(mode) {
   voiceMode = mode;
   if (mode === 'female') {
-    document.getElementById('voice-indicator').innerText = '🔊 VOICE: LISA';
+    document.getElementById('voice-indicator').innerText = '🌐 LANG: ' + (LANG_NAMES[currentLang] || 'English').toUpperCase() + ' | 🔊 VOICE: LISA';
     document.getElementById('voice-indicator').style.color = '#ff69b4';
     speakOnce("Hi! I am Lisa your Jarvis mirror assistant!");
   } else {
-    document.getElementById('voice-indicator').innerText = '🔊 VOICE: MALE';
+    document.getElementById('voice-indicator').innerText = '🌐 LANG: ' + (LANG_NAMES[currentLang] || 'English').toUpperCase() + ' | 🔊 VOICE: MALE';
     document.getElementById('voice-indicator').style.color = '#888';
     speakOnce("Hello! Switched to male voice!");
   }
@@ -1695,6 +1659,13 @@ document.addEventListener('click', () => {
 document.addEventListener('touchstart', () => {
   if (!recognitionRunning) safeStart(50);
 }, { passive: true });
+
+// Preload available SpeechSynthesis voices
+if ('speechSynthesis' in window) {
+  window.speechSynthesis.onvoiceschanged = () => {
+    window.speechSynthesis.getVoices();
+  };
+}
 
 // Make startMirror available globally
 window.startMirror = startMirror;

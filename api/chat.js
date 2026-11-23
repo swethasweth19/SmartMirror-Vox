@@ -3,14 +3,13 @@
 // Features automatic multi-model fallback across active Groq Developer models
 
 const TEXT_MODELS = [
-  "openai/gpt-oss-120b",
-  "openai/gpt-oss-20b",
-  "qwen/qwen3.8-27b"
+  "llama-3.1-8b-instant",
+  "llama-3.3-70b-versatile"
 ];
 
 const VISION_MODELS = [
-  "qwen/qwen3.8-27b",
-  "openai/gpt-oss-120b"
+  "llama-3.2-11b-vision-preview",
+  "llama-3.2-90b-vision-preview"
 ];
 
 module.exports = async function handler(req, res) {
