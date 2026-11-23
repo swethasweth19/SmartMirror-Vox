@@ -1036,7 +1036,6 @@ function setupRecognition() {
 
     handleQuestion(rawText.trim());
   }
-  };
 
   recognition.onerror = (event) => {
     recognitionRunning = false;
@@ -1566,10 +1565,6 @@ function playBrowserTTS(text, targetVoiceOverride, myCount, onComplete) {
       cleanup();
     }
   }, 50);
-}
-
-    window.speechSynthesis.speak(utter);
-  }, 100);
 }
 
 // ========== VOICE SWITCH (voice-controlled) ==========
