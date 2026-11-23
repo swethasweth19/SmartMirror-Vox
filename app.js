@@ -108,45 +108,61 @@ const LANG_NAMES = {
 
 // ========== MULTI-LINGUAL COMMAND DETECTORS ==========
 function isWakeWord(text) {
-  const check = (text || '').toLowerCase();
+  const check = (text || '').toLowerCase().trim();
+  if (!check) return false;
   return (
-    // English
+    // English variations and common misrecognitions
     check.includes('jarvis') ||
-    check.includes('jarvish') ||
     check.includes('javis') ||
+    check.includes('jarvish') ||
+    check.includes('javish') ||
     check.includes('jarwis') ||
     check.includes('jervis') ||
     check.includes('charvis') ||
+    check.includes('chavis') ||
     check.includes('travis') ||
+    check.includes('davis') ||
     check.includes('service') ||
     check.includes('wake up') ||
     check.includes('hey jarvis') ||
     check.includes('hey jarvish') ||
     check.includes('hi jarvis') ||
     check.includes('hello jarvis') ||
+    /\b(jarvis|javis|jarvish|javish|jervis|travis|service)\b/i.test(check) ||
     // Hindi
     check.includes('जार्विस') ||
     check.includes('जार्विश') ||
     check.includes('जाविस') ||
+    check.includes('जरविस') ||
     check.includes('हे जार्विस') ||
     check.includes('उठो') ||
     // Kannada
     check.includes('ಜಾರ್ವಿಸ್') ||
     check.includes('ಜಾರ್ವಿಶ್') ||
     check.includes('ಜಾವಿಸ್') ||
+    check.includes('ಜಾರ್ವಿ') ||
     check.includes('ಹೇ ಜಾರ್ವಿಸ್') ||
     check.includes('ಎದ್ದೇಳು') ||
-    // Telugu & Tamil
+    // Telugu
     check.includes('జార్విస్') ||
     check.includes('జర్విస్') ||
     check.includes('జావిస్') ||
-    check.includes('లే') ||
+    check.includes('హే జార్విస్') ||
+    // Tamil
     check.includes('ஜார்விஸ்') ||
     check.includes('சார்விஸ்') ||
     check.includes('ஜார்வி') ||
     check.includes('சார்விஷ்') ||
+    check.includes('ஹே ஜார்விஸ்') ||
     check.includes('எழுந்திரு')
   );
+}
+
+function extractCommandAfterWake(text) {
+  if (!text) return '';
+  return text
+    .replace(/^(hey|hi|hello|ok|okay)?\s*(jarvis|jarvish|javis|javish|jarwis|jervis|charvis|chavis|travis|davis|service|wake up|जार्विस|ಜಾರ್ವಿಸ್|జార్విస్|ஜார்விஸ்)\s*,?\s*/i, '')
+    .trim();
 }
 
 function isSleepCommand(text) {
@@ -917,9 +933,13 @@ function setupRecognition() {
 
     // Wake word detection (when asleep)
     if (!conversationActive) {
-      if (isWakeWord(check)) {
+      if (isWakeWord(check) || isWakeWord(heard)) {
         if (silenceDebounceTimer) clearTimeout(silenceDebounceTimer);
-        activateConversation();
+        const commandAfter = extractCommandAfterWake(heard || check);
+        activateConversation(!commandAfter);
+        if (commandAfter && commandAfter.length > 2) {
+          processTranscript(commandAfter);
+        }
       }
       return;
     }
@@ -931,8 +951,7 @@ function setupRecognition() {
       return;
     }
 
-    // Snappy Interim Debouncer: If user stops speaking for 650ms, process question!
-    // Eliminates Chrome's 2.5-second dead silence wait
+    // Snappy Interim Debouncer: If user stops speaking for 600ms, process question!
     if (interimTranscript.trim() && conversationActive && !isProcessing && !isSpeaking) {
       if (silenceDebounceTimer) clearTimeout(silenceDebounceTimer);
       const textToRun = interimTranscript.trim();
@@ -940,7 +959,7 @@ function setupRecognition() {
         if (conversationActive && !isProcessing && !isSpeaking) {
           processTranscript(textToRun);
         }
-      }, 650);
+      }, 600);
     }
   };
 
@@ -948,7 +967,15 @@ function setupRecognition() {
     if (silenceDebounceTimer) clearTimeout(silenceDebounceTimer);
     if (!rawText || !rawText.trim() || isProcessing || isSpeaking) return;
 
-    const t = rawText.trim().toLowerCase();
+    // Strip leading wake word if present
+    const cleanedText = rawText.replace(/^(hey|hi|hello|ok|okay)?\s*(jarvis|jarvish|javis|javish|jarwis|jervis|charvis|chavis|travis|davis|service|wake up|जार्विस|ಜಾರ್ವಿಸ್|జార్విస్|జార్వి|ஜார்விஸ்)\s*,?\s*/i, '').trim();
+
+    if (!cleanedText) {
+      activateConversation(true);
+      return;
+    }
+
+    const t = cleanedText.toLowerCase();
 
     // Sleep commands
     if (isSleepCommand(t)) {
@@ -967,6 +994,48 @@ function setupRecognition() {
       return;
     }
 
+    // Instant Local Answers: Time
+    if (/\b(time|what('?s|\s+is)\s+the\s+time|tell\s+me\s+the\s+time|current\s+time)\b/i.test(t)) {
+      const timeStr = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+      let msg = `The time is ${timeStr}.`;
+      if (currentLang === 'hi-IN') msg = `अभी का समय ${timeStr} है।`;
+      else if (currentLang === 'kn-IN') msg = `ಈಗ ಸಮಯ ${timeStr}.`;
+      else if (currentLang === 'te-IN') msg = `ఇప్పుడు సమయం ${timeStr}.`;
+      else if (currentLang === 'ta-IN') msg = `இப்போது நேரம் ${timeStr}.`;
+      setAIStatus("🤖 JARVIS TIME");
+      setAIResponse(msg);
+      speakOnce(msg);
+      return;
+    }
+
+    // Instant Local Answers: Weather
+    if (/\b(weather|temperature|how('?s|\s+is)\s+the\s+weather|weather\s+today|climate)\b/i.test(t)) {
+      const w = currentWeatherInfo || "24 degrees Celsius with patchy rain";
+      let msg = `Currently in Bangalore, it is ${w}.`;
+      if (currentLang === 'hi-IN') msg = `बैंगलोर में अभी का मौसम: ${w}।`;
+      else if (currentLang === 'kn-IN') msg = `ಬೆಂಗಳೂರಿನಲ್ಲಿ ಪ್ರಸ್ತುತ ಹವಾಮಾನ: ${w}.`;
+      else if (currentLang === 'te-IN') msg = `బెంగళూరులో ప్రస్తుత వాతావరణం: ${w}.`;
+      else if (currentLang === 'ta-IN') msg = `பெங்களூரில் தற்போதைய வானிலை: ${w}.`;
+      setAIStatus("🌤 JARVIS WEATHER");
+      setAIResponse(msg);
+      speakOnce(msg);
+      return;
+    }
+
+    // Instant Local Answers: News
+    if (/\b(news|headlines|top\s+news|today('?s)?\s+news)\b/i.test(t)) {
+      const n = currentNewsHeadlines || "Latest headlines loaded on your mirror screen";
+      let msg = `Here are today's headlines: ${n}.`;
+      if (currentLang === 'hi-IN') msg = `आज की मुख्य खबरें: ${n}।`;
+      else if (currentLang === 'kn-IN') msg = `ಇಂದಿನ ಪ್ರಮುಖ ಸುದ್ದಿಗಳು: ${n}.`;
+      else if (currentLang === 'te-IN') msg = `నేటి ముఖ్య వార్తలు: ${n}.`;
+      else if (currentLang === 'ta-IN') msg = `இன்றைய முக்கிய செய்திகள்: ${n}.`;
+      setAIStatus("📰 JARVIS NEWS");
+      setAIResponse(msg);
+      speakOnce(msg);
+      return;
+    }
+
     // Setting preferred song
     const prefSetMatch = t.match(/(?:my\s+favorite\s+song\s+is|my\s+preferred\s+song\s+is|set\s+preferred\s+song\s+to|set\s+favorite\s+song\s+to)\s+(.+)/i);
     if (prefSetMatch && prefSetMatch[1]) {
@@ -975,13 +1044,13 @@ function setupRecognition() {
     }
 
     // Specific song requests (e.g. "play Arabic Kuthu", "play Believer", "play Kesariya", "play Samajavaragamana")
-    const specificSong = extractSpecificSongQuery(rawText.trim());
+    const specificSong = extractSpecificSongQuery(cleanedText.trim());
     if (specificSong) {
       playDirectMusic(specificSong);
       return;
     }
 
-    // Multi-Language general music requests (e.g. "play song", "பாட்டு போடு", "गाना बजाओ", "ಹಾಡು ಹಾಕು", "పాట పెట్టు")
+    // Multi-Language general music requests
     if (isGeneralMusicRequest(t)) {
       playMusicByLanguage('');
       return;
@@ -1034,7 +1103,7 @@ function setupRecognition() {
       return;
     }
 
-    handleQuestion(rawText.trim());
+    handleQuestion(cleanedText.trim());
   }
 
   recognition.onerror = (event) => {
@@ -1099,8 +1168,7 @@ function safeStop() {
 }
 
 // ========== ACTIVATE / SLEEP ==========
-function activateConversation() {
-  if (conversationActive) return;
+function activateConversation(speakGreeting = true) {
   fullyAsleep = false;
   conversationActive = true;
   isProcessing = false;
@@ -1108,39 +1176,53 @@ function activateConversation() {
   const langName = LANG_NAMES[currentLang] || 'English';
   setWakeStatus('🟢 JARVIS ACTIVE (' + langName.toUpperCase() + ')');
   showPulse(true);
-  document.getElementById('transcript').innerText = '👂 "Jarvis" detected!';
-  speakOnce("At your service! How can I help you?");
+  const tr = document.getElementById('transcript');
+  if (tr) tr.innerText = '👂 Listening...';
+
+  if (speakGreeting) {
+    let greeting = "At your service! How can I help you?";
+    if (currentLang === 'hi-IN') greeting = "नमस्ते! मैं आपकी क्या मदद कर सकता हूँ?";
+    else if (currentLang === 'kn-IN') greeting = "ಹಲೋ! ನಾನು ನಿಮಗೆ ಹೇಗೆ ಸಹಾಯ ಮಾಡಲಿ?";
+    else if (currentLang === 'te-IN') greeting = "హలో! నేను మీకు ఎలా సహాయపడగలను?";
+    else if (currentLang === 'ta-IN') greeting = "வணக்கம்! நான் உங்களுக்கு எவ்வாறு உதவலாம்?";
+
+    speakOnce(greeting, () => {
+      safeStart(50);
+    });
+  } else {
+    safeStart(50);
+  }
 }
 
 function goToSleep() {
   conversationActive = false;
   isProcessing = false;
   isSpeaking = false;
-  ignoreInput = true;
-  fullyAsleep = false; // Keep mic active to listen for wake word
+  ignoreInput = false;
+  fullyAsleep = false;
 
   speakCount++;
   conversationHistory = [];
-  window.speechSynthesis.cancel();
+  if ('speechSynthesis' in window) {
+    try { window.speechSynthesis.cancel(); } catch(e) {}
+  }
   safeStop();
 
   showPulse(false);
   setWakeStatus('😴 SAY "JARVIS"');
   setAIResponse('Ready to assist you!');
   setAIStatus('🤖 JARVIS AI MIRROR');
-  document.getElementById('transcript').innerText = '';
+  const tr = document.getElementById('transcript');
+  if (tr) tr.innerText = '';
 
   let byeMsg = "Goodbye! Say Jarvis when you need me!";
   if (currentLang === 'hi-IN') byeMsg = "अलविदा! जब भी ज़रूरत हो, जार्विस बोलें!";
-  else if (currentLang === 'kn-IN') byeMsg = "ವಿದಾಯ! ನಿಮಗೆ ಅಗತ್ಯವಿದ್ದಾಗ ಜಾರ್ವಿಸ್ ಎಂದು ಹೇಳಿ!";
-  else if (currentLang === 'te-IN') byeMsg = "సెలవు! మీకు అవసరమైనప్పుడు జార్విస్ అని చెప్పండి!";
+  else if (currentLang === 'kn-IN') byeMsg = "ವಿದಾಯ! ಅಗತ್ಯವಿದ್ದಾಗ ಜಾರ್ವಿಸ್ ಎಂದು ಹೇಳಿ!";
+  else if (currentLang === 'te-IN') byeMsg = "సెలవు! అవసరమైనప్పుడు జార్విస్ అని చెప్పండి!";
   else if (currentLang === 'ta-IN') byeMsg = "விடைபெறுகிறேன்! தேவைப்படும்போது ஜார்விஸ் என்று சொல்லுங்கள்!";
 
   speakOnce(byeMsg, () => {
-    setTimeout(() => {
-      ignoreInput = false;
-      safeStart(200);
-    }, 300);
+    safeStart(150);
   });
 }
 
@@ -1636,6 +1718,23 @@ function startMirror() {
       .catch(err => {
         console.warn("Camera optional/denied:", err);
       });
+  }
+
+  // Touch / Click to wake up (instantly unlocks Web Audio & awakens Jarvis)
+  const wakeEl = document.getElementById('wake-status');
+  if (wakeEl) {
+    wakeEl.style.cursor = 'pointer';
+    wakeEl.addEventListener('click', () => activateConversation(true));
+  }
+  const pulseEl = document.getElementById('pulseRing');
+  if (pulseEl) {
+    pulseEl.style.cursor = 'pointer';
+    pulseEl.addEventListener('click', () => activateConversation(true));
+  }
+  const transcriptEl = document.getElementById('transcript');
+  if (transcriptEl) {
+    transcriptEl.style.cursor = 'pointer';
+    transcriptEl.addEventListener('click', () => activateConversation(true));
   }
 }
 
