@@ -600,7 +600,7 @@ async function playDirectMusic(query) {
     const res = await fetch(`/api/music?q=${encodeURIComponent(query)}`);
     const data = await res.json();
 
-    if (data.success && data.audioUrl) {
+    if (data.audioUrl) {
       audio.pause();
       audio.src = data.audioUrl;
       audio.volume = MUSIC_VOLUME;
@@ -609,15 +609,15 @@ async function playDirectMusic(query) {
       if (playPromise !== undefined) {
         playPromise.then(() => {
           musicPlaying = true;
-          if (titleEl) titleEl.innerText = data.title;
+          if (titleEl) titleEl.innerText = data.title || query;
           if (statusEl) statusEl.innerText = "🎵 NOW PLAYING";
-          setAIResponse("🎵 Playing: " + data.title);
+          setAIResponse("🎵 Playing: " + (data.title || query));
         }).catch(err => {
-          console.warn("Direct audio autoplay blocked by browser policy, will resume on touch:", err);
+          console.warn("Audio autoplay blocked, will resume on interaction:", err);
           musicPlaying = true;
-          if (titleEl) titleEl.innerText = data.title;
+          if (titleEl) titleEl.innerText = data.title || query;
           if (statusEl) statusEl.innerText = "🎵 NOW PLAYING";
-          setAIResponse("🎵 Playing: " + data.title);
+          setAIResponse("🎵 Playing: " + (data.title || query));
         });
       }
     } else {
@@ -1718,6 +1718,8 @@ function blobToBase64(blob) {
 
 // ========== STARTUP (100% Hands-Free Auto Start) ==========
 let mirrorStarted = false;
+let micRetryCount = 0;
+const MAX_MIC_RETRIES = 20;
 
 function startMirror() {
   if (mirrorStarted) return;
@@ -1726,9 +1728,12 @@ function startMirror() {
   const mirrorEl = document.getElementById('main-mirror');
   if (mirrorEl) mirrorEl.style.display = 'block';
 
-  // START SPEECH RECOGNITION IMMEDIATELY (Don't wait for camera)
+  // STEP 1: Setup speech recognition engine immediately
   setupRecognition();
-  safeStart(100);
+
+  // STEP 2: Aggressively auto-start microphone listening (TRUE hands-free)
+  // The mic MUST start without any touch so "Jarvis" wake word works instantly
+  autoStartMic();
 
   fetchWeather();
   fetchNews();
@@ -1748,22 +1753,39 @@ function startMirror() {
         console.warn("Camera optional/denied:", err);
       });
   }
+}
 
-  // Touch / Click to wake up (instantly unlocks Web Audio & awakens Jarvis)
-  const wakeEl = document.getElementById('wake-status');
-  if (wakeEl) {
-    wakeEl.style.cursor = 'pointer';
-    wakeEl.addEventListener('click', () => activateConversation(true));
-  }
-  const pulseEl = document.getElementById('pulseRing');
-  if (pulseEl) {
-    pulseEl.style.cursor = 'pointer';
-    pulseEl.addEventListener('click', () => activateConversation(true));
-  }
-  const transcriptEl = document.getElementById('transcript');
-  if (transcriptEl) {
-    transcriptEl.style.cursor = 'pointer';
-    transcriptEl.addEventListener('click', () => activateConversation(true));
+// Aggressively auto-start the mic — retries until it succeeds or gives clear feedback
+function autoStartMic() {
+  if (recognitionRunning) return; // Already running, we're good!
+
+  if (!recognition) setupRecognition();
+  if (!recognition) return;
+
+  try {
+    recognition.start();
+    console.log("✅ Mic auto-started — listening for 'Jarvis' wake word");
+  } catch(e) {
+    micRetryCount++;
+    if (micRetryCount < MAX_MIC_RETRIES) {
+      // Retry with increasing delay (100ms, 200ms, 400ms, 800ms, 1s, 1s, ...)
+      const delay = Math.min(1000, 100 * Math.pow(2, Math.min(micRetryCount, 4)));
+      console.log(`Mic auto-start retry ${micRetryCount}/${MAX_MIC_RETRIES} in ${delay}ms...`);
+      setTimeout(autoStartMic, delay);
+    } else {
+      console.warn("❌ Could not auto-start mic after retries. Browser may need ONE interaction.");
+      setWakeStatus('🎤 TAP HERE ONCE, THEN GO HANDS-FREE');
+      // After one tap anywhere, mic starts and never needs touch again
+      const oneTimeTap = () => {
+        document.removeEventListener('click', oneTimeTap);
+        document.removeEventListener('touchstart', oneTimeTap);
+        micRetryCount = 0;
+        autoStartMic();
+        setWakeStatus('😴 SAY "JARVIS"');
+      };
+      document.addEventListener('click', oneTimeTap, { once: true });
+      document.addEventListener('touchstart', oneTimeTap, { once: true });
+    }
   }
 }
 
@@ -1775,12 +1797,18 @@ if (document.readyState === 'loading') {
 }
 window.addEventListener('load', startMirror);
 
-// Passive interaction listener (silently unlocks Web Audio if browser held it back)
+// Passive interaction listener — if mic somehow stopped, restart it
 document.addEventListener('click', () => {
-  if (!recognitionRunning) safeStart(50);
+  if (!recognitionRunning && !fullyAsleep) {
+    micRetryCount = 0;
+    autoStartMic();
+  }
 }, { passive: true });
 document.addEventListener('touchstart', () => {
-  if (!recognitionRunning) safeStart(50);
+  if (!recognitionRunning && !fullyAsleep) {
+    micRetryCount = 0;
+    autoStartMic();
+  }
 }, { passive: true });
 
 // Preload available SpeechSynthesis voices

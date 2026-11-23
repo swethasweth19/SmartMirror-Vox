@@ -230,6 +230,7 @@ def api_music():
                     # Upgrade bitrate to 320kbps or 160kbps if applicable
                     stream_url = stream_url.replace("_96.mp4", "_320.mp4").replace("_96.mp3", "_320.mp3")
                     return jsonify({
+                        "success": True,
                         "title": song.get("song", q),
                         "artist": song.get("primary_artists", ""),
                         "audioUrl": stream_url,
@@ -238,12 +239,14 @@ def api_music():
 
         # Fallback to direct radio streams if search has no decryptable item
         return jsonify({
+            "success": True,
             "title": q.title(),
             "artist": "Smart Mirror Music",
             "audioUrl": "https://stream.zeno.fm/0r0xa792kwzuv"
         }), 200
     except Exception as e:
         return jsonify({
+            "success": True,
             "title": q.title(),
             "artist": "Smart Mirror Music",
             "audioUrl": "https://stream.zeno.fm/0r0xa792kwzuv",
