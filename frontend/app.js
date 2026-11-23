@@ -910,12 +910,18 @@ function setupRecognition() {
       return;
     }
 
-    // 2. STOP / INTERRUPT JARVIS MID-SPEECH
-    if (conversationActive && (isSpeaking || isProcessing)) {
-      if (isStopMusicCommand(check) || check.includes('skip') || check.includes('cancel')) {
-        interruptAndListen();
-        return;
+    // 2. CONVERSATIONAL BARGE-IN INTERRUPTION
+    // If user speaks while Jarvis or music is playing, interrupt immediately!
+    if (conversationActive && isSpeaking && heard.length > 1) {
+      if ('speechSynthesis' in window) {
+        try { window.speechSynthesis.cancel(); } catch(e) {}
       }
+      if (currentTTSAudio) {
+        try { currentTTSAudio.pause(); currentTTSAudio.src = ""; } catch(e) {}
+        currentTTSAudio = null;
+      }
+      isSpeaking = false;
+      ignoreInput = false;
     }
 
     // 3. INSTANT LANGUAGE SWITCH (Works ANYTIME — whether awake or asleep!)
@@ -924,7 +930,7 @@ function setupRecognition() {
       return;
     }
 
-    if (ignoreInput || isSpeaking || isProcessing) return;
+    if (ignoreInput || isProcessing) return;
 
     // Show heard speech in real time
     if (heard) {
@@ -951,21 +957,44 @@ function setupRecognition() {
       return;
     }
 
-    // Snappy Interim Debouncer: If user stops speaking for 600ms, process question!
-    if (interimTranscript.trim() && conversationActive && !isProcessing && !isSpeaking) {
+    // Snappy Interim Debouncer: If user stops speaking for 500ms, process question!
+    if (interimTranscript.trim() && conversationActive && !isProcessing) {
       if (silenceDebounceTimer) clearTimeout(silenceDebounceTimer);
       const textToRun = interimTranscript.trim();
       silenceDebounceTimer = setTimeout(() => {
-        if (conversationActive && !isProcessing && !isSpeaking) {
+        if (conversationActive && !isProcessing) {
           processTranscript(textToRun);
         }
-      }, 600);
+      }, 500);
     }
   };
 
+  let lastProcessedText = '';
+  let lastProcessedTime = 0;
+
   function processTranscript(rawText) {
     if (silenceDebounceTimer) clearTimeout(silenceDebounceTimer);
-    if (!rawText || !rawText.trim() || isProcessing || isSpeaking) return;
+    if (!rawText || !rawText.trim() || isProcessing) return;
+
+    // Cancel any previous speech so user command takes priority
+    if (isSpeaking) {
+      if ('speechSynthesis' in window) {
+        try { window.speechSynthesis.cancel(); } catch(e) {}
+      }
+      if (currentTTSAudio) {
+        try { currentTTSAudio.pause(); currentTTSAudio.src = ""; } catch(e) {}
+        currentTTSAudio = null;
+      }
+      isSpeaking = false;
+      ignoreInput = false;
+    }
+
+    const now = Date.now();
+    if (rawText.trim() === lastProcessedText && (now - lastProcessedTime) < 1500) {
+      return;
+    }
+    lastProcessedText = rawText.trim();
+    lastProcessedTime = now;
 
     // Strip leading wake word if present
     const cleanedText = rawText.replace(/^(hey|hi|hello|ok|okay)?\s*(jarvis|jarvish|javis|javish|jarwis|jervis|charvis|chavis|travis|davis|service|wake up|जार्विस|ಜಾರ್ವಿಸ್|జార్విస్|జార్వి|ஜார்விஸ்)\s*,?\s*/i, '').trim();
